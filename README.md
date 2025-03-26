@@ -1,95 +1,72 @@
-# Bank Statement Extractor
+# Bank Statement Extractor v2.0.0
 
-Extract and analyze transaction data from bank statements (PDF files).
+A tool for extracting transaction data from bank statements and generating financial insights.
 
 ## Features
 
-- Extract transactions from Chase and Bank of America statements
-- Merge multiple statements into a single CSV file
-- View financial summaries and reports
-- Filter and analyze transaction data
+- **PDF Statement Extraction**: Extract transaction data from Chase and Bank of America (BoFA) PDF statements
+- **Web Interface**: User-friendly web application for uploading and processing bank statements
+- **Financial Analysis**: View summaries, charts, and KPIs based on your transaction data
+- **Data Visualization**: Interactive KPI dashboard with income/expense breakdown and trends
+- **Export to CSV**: Download transaction data in CSV format for further analysis
 
-## Building Installation Packages
+## New in Version 2.0.0
+
+- Added interactive KPI dashboard with Streamlit integration
+- Enhanced data visualizations with Plotly charts
+- Improved transaction categorization
+- Simplified user interface with consolidated dashboard
+- Added support for CORS and better error handling
+- Included demo data for testing and development
+
+## Installation
 
 ### Prerequisites
 
-- Python 3.7 or newer
-- PyInstaller (`pip install pyinstaller`)
-- For Windows installer: NSIS (Nullsoft Scriptable Install System)
-- For macOS DMG: create-dmg (`brew install create-dmg`)
-- For Linux AppImage: appimagetool
+- Python 3.9+
+- pip (Python package manager)
 
-### Building Installers
+### Setup
 
-1. Ensure all requirements are installed:
+1. Clone this repository:
    ```
-   pip install -r requirements.txt
-   ```
-
-2. Run the appropriate build script for your platform:
-
-   **Windows:**
-   ```
-   build_installer.bat
-   ```
-
-   **macOS/Linux:**
-   ```
-   ./build_installer.sh
-   ```
-
-3. The installers will be created in the `installers` directory:
-   - Windows: `Bank_Statement_Extractor_Windows_Setup.exe` or `Bank_Statement_Extractor_Windows.zip`
-   - macOS: `Bank_Statement_Extractor_macOS.dmg` or `Bank_Statement_Extractor_macOS.zip`
-   - Linux: `Bank_Statement_Extractor_Linux.AppImage` or `Bank_Statement_Extractor_Linux.tar.gz`
-
-### Sending to Clients
-
-1. Verify the installer works on a clean system
-2. Send the appropriate installer file to your client along with the `INSTALLATION_GUIDE.md` file
-3. Provide your contact information for support
-
-## Development Setup
-
-1. Clone the repository:
-   ```
-   git clone [repository-url]
+   git clone https://github.com/YOUR-USERNAME/Bank_Extraction_Code.git
    cd Bank_Extraction_Code
    ```
 
-2. Create a virtual environment (optional but recommended):
-   ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
+2. Install the required packages:
    ```
    pip install -r requirements.txt
    ```
 
-4. Run the desktop application:
-   ```
-   python GUI/desktop/bank_extractor_gui.py
-   ```
+## Usage
 
-5. Run the web application:
+1. Start the web application:
    ```
    cd GUI/web
    python webapp.py
    ```
 
+2. Open your browser and go to: `http://localhost:4446`
+
+3. Upload your bank statements and select the bank type
+
+4. View the results and KPI dashboard
+
 ## Project Structure
 
-- `Extractor Files/` - Core extraction logic
-- `GUI/desktop/` - Desktop application (PyQt5)
-- `GUI/web/` - Web application (Flask)
-- `Logos/` - Application icons and branding
+- **Extractor Files/**: Core extraction scripts for different bank types
+- **CSV Files/**: Output directory for extracted transaction data
+- **GUI/web/**: Web application files
+  - **static/**: Static assets (CSS, JS, images)
+  - **templates/**: HTML templates
+  - **uploads/**: Temporary storage for uploaded files
+  - **webapp.py**: Main Flask application
 
 ## License
 
-This project is licensed under the terms of the [LICENSE.txt](LICENSE.txt) file.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Support
+## Author
 
-For support, contact the SIGMA BI Development Team. 
+Developed by SIGMA BI - Development Team 

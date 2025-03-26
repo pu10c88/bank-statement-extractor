@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streamlit Dashboard Redirect</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .card {
+            margin-top: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            border-color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <h1 class="mb-4">Streamlit Dashboard</h1>
+        
+        <div class="card mb-4">
+            <div class="card-header">
+                Dashboard Access
+            </div>
+            <div class="card-body">
+                <h5 class="card-title">Your Streamlit dashboard is ready</h5>
+                <p class="card-text">Click the button below to open the dashboard in a new tab. This is a standalone Streamlit application.</p>
+                <a href="{{ streamlit_url }}" target="_blank" class="btn btn-primary">
+                    <i class="bi bi-bar-chart-fill me-2"></i>Open Dashboard
+                </a>
+                <a href="{{ url_for('results', session_id=session_id) }}" class="btn btn-secondary ms-2">
+                    <i class="bi bi-arrow-left me-2"></i>Back to Results
+                </a>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                Note
+            </div>
+            <div class="card-body">
+                <p class="card-text">If the dashboard doesn't open, please wait a few seconds and try again. The Streamlit server may take a moment to start.</p>
+                <p class="card-text small text-muted">Streamlit is running on port 8501. If you get a connection error, make sure this port is not being used by another application.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 

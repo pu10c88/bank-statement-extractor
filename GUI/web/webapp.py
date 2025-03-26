@@ -5,7 +5,7 @@ from pathlib import Path
 
 # App information
 APP_NAME = "Bank Statement Extractor"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 APP_AUTHOR = "SIGMA BI - Development Team"
 
 # Add the Extractor Files directory to the system path - Fix the absolute path
@@ -14,7 +14,7 @@ sys.path.insert(0, extractor_path)
 print(f"Added to path: {extractor_path}")
 
 import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session, jsonify
 import shutil
 import threading
 import time
@@ -23,6 +23,14 @@ import json
 import logging
 import traceback
 from datetime import datetime
+import numpy as np
+
+# Force matplotlib to use non-interactive backend (for any image generation needs)
+import matplotlib
+matplotlib.use('Agg')  # This must be set before importing pyplot
+import matplotlib.pyplot as plt
+import io
+import base64
 from werkzeug.utils import secure_filename
 
 # Import the extraction functions from the existing scripts
@@ -33,6 +41,9 @@ from bofa_statements_load import load_pdf as bofa_load_pdf
 app = Flask(__name__)
 app.secret_key = "bank_extractor_secret_key"
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
+
+# Set APP_ROOT for file path references
+app.config['APP_ROOT'] = os.path.dirname(os.path.abspath(__file__))
 
 # Ensure that the upload directory exists (use absolute path)
 UPLOAD_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 'uploads'))
@@ -500,6 +511,113 @@ def download_month(session_id, month):
         flash(f'Error generating monthly report: {str(e)}')
         return redirect(url_for('results', session_id=session_id))
 
+# Add a debugging route to check file locations
+@app.route('/debug_paths/<session_id>')
+def debug_paths(session_id):
+    """Debug route to check file paths and transaction data"""
+    # Check various file locations
+    file_paths = {
+        'output_dir': app.config['OUTPUT_FOLDER'],
+        'csv_dir': app.config['CSV_FOLDER'],
+        'session_output_dir': os.path.join(app.config['OUTPUT_FOLDER'], session_id),
+        'session_csv_dir': os.path.join(app.config['CSV_FOLDER'], session_id),
+    }
+    
+    # Check specific file existence
+    file_existence = {
+        'all_transactions_in_output': os.path.exists(os.path.join(app.config['OUTPUT_FOLDER'], session_id, 'all_transactions.csv')),
+        'all_transactions_in_csv': os.path.exists(os.path.join(app.config['CSV_FOLDER'], session_id, 'all_transactions.csv')),
+        'all_transactions_in_main_csv': os.path.exists(os.path.join(app.config['CSV_FOLDER'], 'all_transactions.csv')),
+    }
+    
+    # Try to list files in relevant directories
+    files_in_dirs = {}
+    
+    for name, path in file_paths.items():
+        if os.path.exists(path):
+            files_in_dirs[name] = os.listdir(path)
+        else:
+            files_in_dirs[name] = f"Directory doesn't exist: {path}"
+    
+    # Try to load data if a file exists
+    data_summary = {}
+    for name, exists in file_existence.items():
+        if exists:
+            path = None
+            if name == 'all_transactions_in_output':
+                path = os.path.join(app.config['OUTPUT_FOLDER'], session_id, 'all_transactions.csv')
+            elif name == 'all_transactions_in_csv':
+                path = os.path.join(app.config['CSV_FOLDER'], session_id, 'all_transactions.csv')
+            elif name == 'all_transactions_in_main_csv':
+                path = os.path.join(app.config['CSV_FOLDER'], 'all_transactions.csv')
+            
+            if path:
+                try:
+                    df = pd.read_csv(path)
+                    data_summary[name] = {
+                        'rows': len(df),
+                        'columns': df.columns.tolist(),
+                        'has_date': 'date' in df.columns,
+                        'has_amount': 'amount' in df.columns,
+                    }
+                except Exception as e:
+                    data_summary[name] = f"Error reading file: {str(e)}"
+    
+    # Render a debug template
+    return jsonify({
+        'file_paths': file_paths,
+        'file_existence': file_existence,
+        'files_in_dirs': files_in_dirs,
+        'data_summary': data_summary,
+    })
+
+def load_transactions_data(session_id):
+    """Load transaction data from various possible locations"""
+    try:
+        # Check multiple possible locations for transaction data
+        possible_paths = [
+            os.path.join(app.config['CSV_FOLDER'], session_id, 'all_transactions.csv'),
+            os.path.join(app.config['OUTPUT_FOLDER'], session_id, 'all_transactions.csv'),
+            # Fallback to demo data if needed (for testing)
+            os.path.join(app.config['APP_ROOT'], 'static', 'demo_data', 'all_transactions.csv')
+        ]
+        
+        transactions_file = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                transactions_file = path
+                logger.info(f"Found transaction data at: {path}")
+                break
+        
+        if not transactions_file:
+            logger.error(f"No transaction data found. Searched paths: {possible_paths}")
+            return pd.DataFrame()  # Return empty DataFrame
+        
+        # Load the data
+        df = pd.read_csv(transactions_file)
+        logger.info(f"Loaded {len(df)} transactions from {transactions_file}")
+        
+        # Ensure amount is numeric
+        if 'amount' in df.columns:
+            df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
+            
+        # Ensure dates are in datetime format
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            
+        # Fill NaN values
+        df = df.fillna({
+            'description': 'Unknown',
+            'amount': 0.0
+        })
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error loading transaction data: {str(e)}")
+        logger.error(traceback.format_exc())
+        return pd.DataFrame()  # Return empty DataFrame in case of error
+
 def get_session_id():
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
@@ -750,5 +868,334 @@ def process_files(job_id, files, bank_type, output_dir):
     job['end_time'] = datetime.now().isoformat()
     logger.info(f"Job {job_id} completed. Processed {processed_count} files with {len(all_transactions)} transactions.")
 
+@app.route('/simple_streamlit/<session_id>')
+def simple_streamlit(session_id):
+    """Launch a Streamlit KPI dashboard with real data"""
+    try:
+        # Use a fixed port for Streamlit to make it more reliable
+        streamlit_port = 8501
+        logger.info(f"Using port for Streamlit: {streamlit_port}")
+        
+        # Create a Streamlit script that loads and analyzes real transaction data
+        streamlit_script = '''
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from datetime import datetime
+import calendar
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# Basic page configuration
+st.set_page_config(page_title="Financial KPI Dashboard", page_icon="💰", layout="wide")
+
+# Session ID for data loading
+SESSION_ID = "SESSION_ID_PLACEHOLDER"
+
+# Functions to load and process data
+def load_transaction_data(session_id):
+    # Load transaction data from CSV file
+    # Check multiple possible locations for transaction data
+    possible_paths = [
+        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/CSV Files", session_id, 'all_transactions.csv'),
+        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/GUI/web/output", session_id, 'all_transactions.csv'),
+        # Fallback to demo data if needed
+        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/GUI/web/static/demo_data", 'all_transactions.csv')
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            st.sidebar.success(f"Loaded data from: {os.path.basename(os.path.dirname(path))}")
+            return pd.read_csv(path)
+    
+    # If no file found, create dummy data (shouldn't happen with demo data available)
+    st.sidebar.error("No transaction data found. Using demo data.")
+    return pd.DataFrame({
+        'date': pd.date_range(start='2023-01-01', periods=10, freq='M'),
+        'description': ['Salary', 'Rent', 'Groceries', 'Utilities', 'Bonus', 'Restaurant', 'Gas', 'Insurance', 'Shopping', 'Entertainment'],
+        'amount': [5000, -1500, -400, -200, 1000, -150, -80, -120, -350, -200],
+        'type': ['credit', 'debit', 'debit', 'debit', 'credit', 'debit', 'debit', 'debit', 'debit', 'debit']
+    })
+
+def format_currency(amount):
+    # Format amount as currency with thousands separator and 2 decimal places
+    return f"${amount:,.2f}"
+
+def prepare_data(df):
+    # Clean and prepare the data for analysis
+    # Convert date to datetime
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Ensure amount is numeric
+    df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
+    
+    # Add or fix type column
+    if 'type' not in df.columns:
+        df['type'] = df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
+    
+    # Add month column for grouping
+    df['month'] = df['date'].dt.strftime('%Y-%m')
+    df['month_name'] = df['date'].dt.strftime('%b %Y')
+    
+    # Add expense category based on description (simplified)
+    def categorize(desc):
+        desc = desc.lower()
+        if any(word in desc for word in ['salary', 'deposit', 'income', 'bonus']):
+            return 'Income'
+        elif any(word in desc for word in ['grocery', 'food', 'market']):
+            return 'Groceries'
+        elif any(word in desc for word in ['restaurant', 'dining', 'cafe', 'coffee']):
+            return 'Dining'
+        elif any(word in desc for word in ['rent', 'mortgage']):
+            return 'Housing'
+        elif any(word in desc for word in ['gas', 'fuel', 'transit', 'uber', 'lyft']):
+            return 'Transportation'
+        elif any(word in desc for word in ['utility', 'electric', 'water', 'internet', 'phone']):
+            return 'Utilities'
+        elif any(word in desc for word in ['amazon', 'walmart', 'target', 'shop']):
+            return 'Shopping'
+        elif any(word in desc for word in ['doctor', 'medical', 'pharmacy']):
+            return 'Healthcare'
+        else:
+            return 'Other'
+    
+    df['category'] = df['description'].astype(str).apply(categorize)
+    
+    return df
+
+# Load and process data
+df = load_transaction_data(SESSION_ID)
+df = prepare_data(df)
+
+# Calculate KPIs
+income_df = df[df['amount'] > 0]
+expense_df = df[df['amount'] < 0]
+
+total_income = income_df['amount'].sum() if not income_df.empty else 0
+total_expenses = abs(expense_df['amount'].sum()) if not expense_df.empty else 0
+net_profit = total_income - total_expenses
+income_expense_ratio = total_income / total_expenses if total_expenses > 0 else 0
+
+# Group by month for trend analysis
+monthly_data = df.groupby('month').agg(
+    total_amount=('amount', 'sum'),
+    income=('amount', lambda x: sum(i for i in x if i > 0)),
+    expenses=('amount', lambda x: sum(i for i in x if i < 0)),
+    transactions=('amount', 'count')
+).reset_index()
+monthly_data['expenses'] = monthly_data['expenses'].abs()
+
+# Group by category for donut chart
+category_data = df[df['amount'] < 0].groupby('category').agg(
+    amount=('amount', lambda x: abs(sum(x))),
+    count=('amount', 'count')
+).reset_index()
+category_data = category_data.sort_values('amount', ascending=False)
+
+# Find highest income and expense months
+if not monthly_data.empty:
+    highest_income_month = monthly_data.loc[monthly_data['income'].idxmax()]
+    highest_expense_month = monthly_data.loc[monthly_data['expenses'].idxmax()]
+else:
+    highest_income_month = pd.Series({'month': 'N/A', 'income': 0})
+    highest_expense_month = pd.Series({'month': 'N/A', 'expenses': 0})
+
+# Average monthly calculations
+avg_monthly_income = total_income / len(monthly_data) if len(monthly_data) > 0 else 0
+avg_monthly_expenses = total_expenses / len(monthly_data) if len(monthly_data) > 0 else 0
+
+# DASHBOARD LAYOUT
+st.title('Financial KPI Dashboard')
+
+# Top KPI Cards
+st.markdown("### Key Performance Indicators")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Income", f"${total_income:,.2f}")
+col2.metric("Total Expenses", f"${total_expenses:,.2f}")
+col3.metric("Net Profit", f"${net_profit:,.2f}")
+col4.metric("Income/Expense Ratio", f"{income_expense_ratio:.2f}")
+
+# Second row of KPIs
+st.markdown("### Financial Insights")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Avg Monthly Income", f"${avg_monthly_income:,.2f}")
+col2.metric("Avg Monthly Expenses", f"${avg_monthly_expenses:,.2f}")
+col3.metric(f"Best Income Month", f"${highest_income_month['income']:,.2f} ({highest_income_month['month']})")
+col4.metric(f"Highest Expense Month", f"${highest_expense_month['expenses']:,.2f} ({highest_expense_month['month']})")
+
+# Income vs Expenses Trends
+st.markdown("### Monthly Income vs Expenses")
+if not monthly_data.empty:
+    # Sort by month to ensure chronological order
+    monthly_data = monthly_data.sort_values('month')
+    monthly_data['month_name'] = monthly_data['month'].apply(lambda x: pd.to_datetime(x + '-01').strftime('%b %Y'))
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=monthly_data['month_name'],
+        y=monthly_data['income'],
+        name='Income',
+        marker_color='green',
+        text=[f"${x:,.2f}" for x in monthly_data['income']],
+        textposition='auto'
+    ))
+    fig.add_trace(go.Bar(
+        x=monthly_data['month_name'],
+        y=monthly_data['expenses'],
+        name='Expenses',
+        marker_color='red',
+        text=[f"${x:,.2f}" for x in monthly_data['expenses']],
+        textposition='auto'
+    ))
+    fig.add_trace(go.Scatter(
+        x=monthly_data['month_name'],
+        y=monthly_data['total_amount'],
+        name='Net',
+        mode='lines+markers',
+        line=dict(color='blue', width=3),
+        marker=dict(size=8),
+        text=[f"${x:,.2f}" for x in monthly_data['total_amount']],
+        hoverinfo='text+name'
+    ))
+    
+    fig.update_layout(
+        barmode='group',
+        title='Monthly Income vs Expenses',
+        xaxis_title='Month',
+        yaxis_title='Amount ($)',
+        legend_title='Type',
+        hovermode='x unified',
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Not enough monthly data to display trends.")
+
+# Expense Breakdown
+st.markdown("### Expense Breakdown by Category")
+col1, col2 = st.columns([3, 2])
+
+with col1:
+    if not category_data.empty:
+        # Create pie chart
+        fig = px.pie(
+            category_data, 
+            values='amount', 
+            names='category',
+            title='Expense Distribution by Category',
+            hole=0.4,
+            color_discrete_sequence=px.colors.sequential.Plasma_r
+        )
+        
+        # Update trace to add percentage and amount
+        fig.update_traces(
+            textposition='inside',
+            textinfo='percent+label',
+            hovertemplate='<b>%{label}</b><br>Amount: $%{value:,.2f}<br>Percentage: %{percent}'
+        )
+        
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No expense categories to display.")
+
+with col2:
+    if not category_data.empty:
+        # Format the table display
+        display_data = category_data.copy()
+        display_data['amount'] = display_data['amount'].apply(lambda x: f"${x:,.2f}")
+        display_data.columns = ['Category', 'Amount', 'Transactions']
+        
+        st.markdown("### Top Expense Categories")
+        st.dataframe(
+            display_data,
+            hide_index=True,
+            column_config={
+                "Category": st.column_config.TextColumn("Category"),
+                "Amount": st.column_config.TextColumn("Amount"),
+                "Transactions": st.column_config.NumberColumn("Transactions")
+            },
+            height=400
+        )
+    else:
+        st.info("No expense categories to display.")
+
+# Transaction volume by month
+st.markdown("### Transaction Volume by Month")
+if not monthly_data.empty:
+    fig = px.bar(
+        monthly_data, 
+        x='month_name', 
+        y='transactions',
+        text_auto=True,
+        title='Number of Transactions per Month',
+        color='transactions', 
+        color_continuous_scale='Viridis'
+    )
+    
+    fig.update_layout(
+        xaxis_title='Month',
+        yaxis_title='Transaction Count',
+        height=400
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Not enough data to display transaction volume.")
+
+# Add a back button
+if st.sidebar.button("Back to Results"):
+    st.sidebar.markdown('<meta http-equiv="refresh" content="0;URL=/results/%s"/>' % SESSION_ID, unsafe_allow_html=True)
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"Total Transactions: **{len(df)}**")
+st.sidebar.markdown(f"Data Range: **{df['date'].min().strftime('%b %d, %Y')}** to **{df['date'].max().strftime('%b %d, %Y')}**")
+'''
+        
+        # Replace SESSION_ID with the actual session_id
+        streamlit_script = streamlit_script.replace('SESSION_ID_PLACEHOLDER', session_id)
+        
+        # Save the Streamlit script to a file
+        temp_script_path = os.path.join(app.config['APP_ROOT'], f'temp_simple_streamlit_{session_id}.py')
+        with open(temp_script_path, 'w') as f:
+            f.write(streamlit_script)
+        
+        logger.info(f"Created KPI dashboard Streamlit script at {temp_script_path}")
+        
+        # Instead of embedding in an iframe, provide a link to the user with instructions
+        flash("KPI dashboard is starting. Click the link below to access it.", "info")
+        
+        # Start Streamlit in a separate process without waiting for it
+        import subprocess
+        subprocess.Popen(
+            [
+                'streamlit', 'run', 
+                temp_script_path, 
+                '--server.port', str(streamlit_port),
+                '--server.headless', 'true',
+                '--browser.serverAddress', 'localhost',
+                '--server.enableCORS', 'true',
+                '--server.enableXsrfProtection', 'false'
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        # Return a page with a direct link to the Streamlit dashboard
+        return render_template(
+            'streamlit_redirect.html',
+            session_id=session_id,
+            streamlit_url=f"http://localhost:{streamlit_port}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error launching KPI dashboard: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash(f"Error launching dashboard: {str(e)}", "danger")
+        return redirect(url_for('results', session_id=session_id))
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=4445) 
+    app.run(debug=True, host='0.0.0.0', port=4446) 

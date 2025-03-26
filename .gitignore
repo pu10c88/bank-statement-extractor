@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+*.log
+/CSV Files/**/
+!/CSV Files/README.md
+/GUI/web/output/*
+!/GUI/web/output/.gitkeep
+/GUI/web/uploads/**/
+!/GUI/web/uploads/.gitkeep
+/GUI/web/temp_*.py
+/GUI/web/static/images/*.png
+/GUI/web/static/demo_data/*
+!/GUI/web/static/demo_data/.gitkeep
+*/build/
+*/dist/
+installers/
+
+# Keep demo data structure, not user files
+!/GUI/web/static/demo_data/all_transactions.csv 
