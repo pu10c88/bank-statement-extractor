@@ -1,0 +1,9 @@
+PyQt5>=5.15.0
+pandas>=1.0.0
+numpy>=1.18.0
+PyPDF2>=2.0.0
+tabula-py>=2.0.0
+JPype1>=1.2.0
+openpyxl>=3.0.0
+pyinstaller>=6.0.0
+setuptools>=42.0.0 
