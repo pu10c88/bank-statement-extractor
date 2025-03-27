@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} - Error</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            /* Sigma theme colors */
+            --sigma-dark: #0a1929;
+            --sigma-primary: #1e3a8a;
+            --sigma-secondary: #0553b1;
+            --sigma-accent: #3984ff;
+            --sigma-highlight: #64b5f6;
+            --sigma-text: #e6f1ff;
+            --sigma-success: #00b894;
+            --sigma-danger: #ed4337;
+            --sigma-light-bg: #0f2942;
+            --sigma-card-bg: #162c41;
+            --sigma-border: #203e5a;
+        }
+        
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            background-color: var(--sigma-dark);
+            color: var(--sigma-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .error-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: var(--sigma-card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--sigma-border);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            padding: 2rem;
+            text-align: center;
+        }
+        
+        .error-icon {
+            font-size: 4rem;
+            color: var(--sigma-danger);
+            margin-bottom: 1rem;
+        }
+        
+        .error-code {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: var(--sigma-highlight);
+        }
+        
+        .error-name {
+            font-size: 1.4rem;
+            color: #a0c0e0;
+            margin-bottom: 1.5rem;
+        }
+        
+        .error-description {
+            color: var(--sigma-text);
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+        
+        .error-actions {
+            margin-top: 2rem;
+        }
+        
+        .logo-img {
+            height: 60px;
+            margin-bottom: 1rem;
+        }
+        
+        .btn-primary {
+            background-color: var(--sigma-primary);
+            border-color: var(--sigma-primary);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--sigma-secondary);
+            border-color: var(--sigma-secondary);
+        }
+        
+        .btn-outline-secondary {
+            color: var(--sigma-highlight);
+            border-color: var(--sigma-highlight);
+        }
+        
+        .btn-outline-secondary:hover {
+            background-color: var(--sigma-highlight);
+            color: var(--sigma-dark);
+            border-color: var(--sigma-highlight);
+        }
+        
+        @media (max-width: 576px) {
+            .error-container {
+                margin: 0 1rem;
+                padding: 1.5rem;
+            }
+            .error-icon {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-container">
+            <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="{{ app_name }} Logo" class="logo-img">
+            <div class="error-icon">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <div class="error-code">{{ error_code }}</div>
+            <div class="error-name">{{ error_name }}</div>
+            <div class="error-description">{{ error_description }}</div>
+            <div class="error-actions">
+                <a href="{{ url_for('index') }}" class="btn btn-primary">
+                    <i class="bi bi-house-fill me-2"></i>Return to Home
+                </a>
+                <button onclick="window.history.back()" class="btn btn-outline-secondary ms-2">
+                    <i class="bi bi-arrow-left me-2"></i>Go Back
+                </button>
+            </div>
+            <div class="mt-4 pt-3 border-top" style="border-color: var(--sigma-border) !important;">
+                <small style="color: #a0c0e0;">
+                    If you continue to experience issues, please contact support.
+                </small>
+            </div>
+        </div>
+    </div>
+
+    {% include 'footer.html' %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

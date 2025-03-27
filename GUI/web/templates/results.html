@@ -5,60 +5,226 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }} - Results</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
     <style>
+        :root {
+            /* Sigma theme colors */
+            --sigma-dark: #0a1929;
+            --sigma-primary: #1e3a8a;
+            --sigma-secondary: #0553b1;
+            --sigma-accent: #3984ff;
+            --sigma-highlight: #64b5f6;
+            --sigma-text: #e6f1ff;
+            --sigma-success: #00b894;
+            --sigma-danger: #ed4337;
+            --sigma-light-bg: #0f2942;
+            --sigma-card-bg: #162c41;
+            --sigma-border: #203e5a;
+        }
+        
         body {
             padding-top: 1.5rem;
             padding-bottom: 1.5rem;
+            background-color: var(--sigma-dark);
+            color: var(--sigma-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
         .header {
             padding-bottom: 1.5rem;
-            border-bottom: 1px solid #e5e5e5;
+            border-bottom: 1px solid var(--sigma-border);
             margin-bottom: 2rem;
         }
+        
         .financial-summary {
             margin-bottom: 2rem;
         }
+        
         .card {
             margin-bottom: 1rem;
+            background-color: var(--sigma-card-bg);
+            border-color: var(--sigma-border);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
         }
+        
+        .card-header {
+            background-color: var(--sigma-primary);
+            color: white;
+            border-bottom: 1px solid var(--sigma-border);
+            font-weight: 500;
+        }
+        
         .btn-group {
             margin-bottom: 1rem;
         }
+        
         .financial-card {
             margin-bottom: 15px;
             text-align: center;
+            border-radius: 8px;
+            overflow: hidden;
+            border: none;
         }
+        
         .financial-card .card-body {
             padding: 15px;
         }
+        
         .financial-card h5 {
             margin-bottom: 5px;
             font-size: 1rem;
+            opacity: 0.9;
         }
+        
         .financial-card h2 {
             font-size: 1.8rem;
             margin-bottom: 0;
+            font-weight: 600;
         }
+        
         .logo-img {
             height: 60px;
             margin-right: 15px;
         }
+        
         .header-content {
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
+        
         .header-content .title {
             display: flex;
             align-items: center;
         }
+        
         .header-content .actions {
             display: flex;
             align-items: center;
         }
+        
         .help-btn {
             margin-right: 15px;
+            color: var(--sigma-highlight);
+            border-color: var(--sigma-highlight);
+        }
+        
+        .help-btn:hover {
+            background-color: var(--sigma-highlight);
+            color: var(--sigma-dark);
+            border-color: var(--sigma-highlight);
+        }
+        
+        .btn-primary {
+            background-color: var(--sigma-primary);
+            border-color: var(--sigma-primary);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--sigma-secondary);
+            border-color: var(--sigma-secondary);
+        }
+        
+        .btn-success {
+            background-color: var(--sigma-success);
+            border-color: var(--sigma-success);
+        }
+        
+        .btn-secondary {
+            background-color: var(--sigma-light-bg);
+            border-color: var(--sigma-border);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #1a3854;
+            border-color: var(--sigma-accent);
+        }
+        
+        table.table {
+            color: var(--sigma-text);
+            border-color: var(--sigma-border);
+        }
+        
+        .table-striped>tbody>tr:nth-of-type(odd)>* {
+            background-color: rgba(255, 255, 255, 0.03);
+            color: var(--sigma-text);
+        }
+        
+        .table-striped>tbody>tr:nth-of-type(even)>* {
+            background-color: var(--sigma-card-bg);
+            color: var(--sigma-text);
+        }
+        
+        .table-bordered {
+            border-color: var(--sigma-border);
+        }
+        
+        .table thead th {
+            background-color: var(--sigma-primary);
+            color: white;
+            border-color: var(--sigma-border);
+        }
+        
+        .dataTables_wrapper .dataTables_length,
+        .dataTables_wrapper .dataTables_filter,
+        .dataTables_wrapper .dataTables_info,
+        .dataTables_wrapper .dataTables_processing,
+        .dataTables_wrapper .dataTables_paginate {
+            color: var(--sigma-text);
+        }
+        
+        .dataTables_wrapper .dataTables_paginate .paginate_button {
+            color: var(--sigma-text) !important;
+        }
+        
+        .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+        .dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+            background: var(--sigma-accent) !important;
+            color: white !important;
+            border-color: var(--sigma-accent) !important;
+        }
+        
+        .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+            background: var(--sigma-secondary) !important;
+            color: white !important;
+            border-color: var(--sigma-secondary) !important;
+        }
+        
+        .dataTables_wrapper .dataTables_length select,
+        .dataTables_wrapper .dataTables_filter input {
+            background-color: var(--sigma-light-bg);
+            border-color: var(--sigma-border);
+            color: var(--sigma-text);
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.25rem;
+        }
+        
+        .alert-warning {
+            background-color: rgba(246, 185, 59, 0.2);
+            border-color: #f6b93b;
+            color: #f6ecd2;
+        }
+        
+        .lead {
+            color: #a0c0e0;
+        }
+        
+        .btn-outline-primary {
+            color: var(--sigma-accent);
+            border-color: var(--sigma-accent);
+        }
+        
+        .btn-outline-primary:hover {
+            background-color: var(--sigma-accent);
+            color: white;
+            border-color: var(--sigma-accent);
         }
     </style>
 </head>
@@ -99,7 +265,7 @@
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-3">
-                                <div class="card financial-card bg-light">
+                                <div class="card financial-card bg-dark">
                                     <div class="card-body">
                                         <h5>Total Transactions</h5>
                                         <h2>{{ transactions|length }}</h2>
@@ -107,7 +273,7 @@
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card financial-card bg-success text-white">
+                                <div class="card financial-card" style="background-color: var(--sigma-success);">
                                     <div class="card-body">
                                         <h5>Total Income</h5>
                                         <h2>{{ income_total }}</h2>
@@ -115,7 +281,7 @@
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card financial-card bg-danger text-white">
+                                <div class="card financial-card" style="background-color: var(--sigma-danger);">
                                     <div class="card-body">
                                         <h5>Total Expenses</h5>
                                         <h2>{{ expense_total }}</h2>
@@ -123,7 +289,7 @@
                                 </div>
                             </div>
                             <div class="col-md-3">
-                                <div class="card financial-card bg-primary text-white">
+                                <div class="card financial-card" style="background-color: var(--sigma-secondary);">
                                     <div class="card-body">
                                         <h5>Net Profit</h5>
                                         <h2>{{ net_profit }}</h2>

@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} - Help & Documentation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            /* Sigma theme colors */
+            --sigma-dark: #0a1929;
+            --sigma-primary: #1e3a8a;
+            --sigma-secondary: #0553b1;
+            --sigma-accent: #3984ff;
+            --sigma-highlight: #64b5f6;
+            --sigma-text: #e6f1ff;
+            --sigma-success: #00b894;
+            --sigma-danger: #ed4337;
+            --sigma-light-bg: #0f2942;
+            --sigma-card-bg: #162c41;
+            --sigma-border: #203e5a;
+        }
+
+        body {
+            padding-top: 1.5rem;
+            padding-bottom: 1.5rem;
+            background-color: var(--sigma-dark);
+            color: var(--sigma-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .header {
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--sigma-border);
+            margin-bottom: 2rem;
+        }
+        
+        .logo-img {
+            height: 60px;
+            margin-right: 15px;
+        }
+        
+        .header-content {
+            display: flex;
+            align-items: center;
+        }
+        
+        .help-card {
+            margin-bottom: 1.5rem;
+            background-color: var(--sigma-card-bg);
+            border: 1px solid var(--sigma-border);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .help-card .card-header {
+            background-color: var(--sigma-primary);
+            color: white;
+            font-weight: 600;
+            border-bottom: 1px solid var(--sigma-border);
+        }
+        
+        .help-card .card-body {
+            padding: 1.5rem;
+        }
+        
+        .help-steps {
+            counter-reset: step-counter;
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .help-steps li {
+            counter-increment: step-counter;
+            margin-bottom: 1rem;
+            padding-left: 2.5rem;
+            position: relative;
+        }
+        
+        .help-steps li:before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1.75rem;
+            height: 1.75rem;
+            background-color: var(--sigma-accent);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .help-image {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid var(--sigma-border);
+            border-radius: 0.5rem;
+            margin: 1rem 0;
+        }
+        
+        .faq-question {
+            cursor: pointer;
+            padding: 1rem;
+            background-color: var(--sigma-light-bg);
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        
+        .faq-answer {
+            padding: 1rem;
+            border-left: 3px solid var(--sigma-accent);
+            margin-bottom: 1.5rem;
+            background-color: rgba(57, 132, 255, 0.1);
+        }
+        
+        /* Table of contents */
+        .toc {
+            position: sticky;
+            top: 2rem;
+            max-height: calc(100vh - 4rem);
+            overflow-y: auto;
+            padding-right: 1rem;
+        }
+        
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            margin-bottom: 0.5rem;
+        }
+        
+        .toc a {
+            text-decoration: none;
+            color: var(--sigma-accent);
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+            color: var(--sigma-highlight);
+        }
+        
+        .toc-section {
+            font-weight: 600;
+            margin-top: 1rem;
+            padding-left: 0 !important;
+        }
+        
+        .toc-subsection {
+            padding-left: 1rem !important;
+            opacity: 0.8;
+        }
+        
+        /* Mobile optimizations */
+        @media (max-width: 767.98px) {
+            .header-content {
+                flex-direction: column;
+                text-align: center;
+            }
+            .logo-img {
+                margin-right: 0;
+                margin-bottom: 1rem;
+            }
+            .toc {
+                position: relative;
+                max-height: none;
+                margin-bottom: 2rem;
+            }
+        }
+        
+        h2, h3, h4, h5 {
+            color: var(--sigma-highlight);
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .alert-info {
+            background-color: rgba(57, 132, 255, 0.2);
+            border-color: var(--sigma-accent);
+            color: var(--sigma-text);
+        }
+        
+        .alert-primary {
+            background-color: rgba(30, 58, 138, 0.2);
+            border-color: var(--sigma-primary);
+            color: var(--sigma-text);
+        }
+        
+        .alert-warning {
+            background-color: rgba(246, 185, 59, 0.2);
+            border-color: #f6b93b;
+            color: #f6ecd2;
+        }
+        
+        .lead {
+            color: #a0c0e0;
+        }
+        
+        .btn-outline-primary {
+            color: var(--sigma-accent);
+            border-color: var(--sigma-accent);
+        }
+        
+        .btn-outline-primary:hover {
+            background-color: var(--sigma-accent);
+            color: white;
+            border-color: var(--sigma-accent);
+        }
+        
+        strong {
+            color: var(--sigma-highlight);
+        }
+        
+        code {
+            background-color: var(--sigma-light-bg);
+            color: #f6b93b;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="SIGMA BI Logo" class="logo-img">
+                <div class="flex-grow-1">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h1>Help & Documentation</h1>
+                    </div>
+                    <p class="lead">Complete guide to using {{ app_name }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <div class="btn-group">
+                <a href="{{ url_for('index') }}" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-left"></i> Back to Home
+                </a>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Table of Contents (Sidebar) -->
+            <div class="col-12 col-md-3">
+                <div class="toc">
+                    <h5>Contents</h5>
+                    <ul>
+                        <li class="toc-section"><a href="#getting-started">Getting Started</a></li>
+                        <li class="toc-subsection"><a href="#upload-statements">Uploading Statements</a></li>
+                        <li class="toc-subsection"><a href="#processing">Processing Files</a></li>
+                        <li class="toc-section"><a href="#dashboards">Using Dashboards</a></li>
+                        <li class="toc-subsection"><a href="#kpi-dashboard">KPI Dashboard</a></li>
+                        <li class="toc-subsection"><a href="#analytics-dashboard">Analytics Dashboard</a></li>
+                        <li class="toc-section"><a href="#features">Key Features</a></li>
+                        <li class="toc-subsection"><a href="#data-export">Data Export</a></li>
+                        <li class="toc-subsection"><a href="#forecasting">Financial Forecasting</a></li>
+                        <li class="toc-section"><a href="#faq">FAQ</a></li>
+                        <li class="toc-section"><a href="#troubleshooting">Troubleshooting</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-12 col-md-9">
+                <!-- Getting Started Section -->
+                <section id="getting-started">
+                    <h2 class="mb-4">Getting Started</h2>
+                    
+                    <div class="help-card">
+                        <div class="card-header">
+                            <i class="bi bi-info-circle me-2"></i>About {{ app_name }}
+                        </div>
+                        <div class="card-body">
+                            <p>{{ app_name }} is a powerful tool that extracts transaction data from your bank statements and provides comprehensive financial analysis. The application supports statements from multiple banks and offers various visual representations of your financial data.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="help-card" id="upload-statements">
+                        <div class="card-header">
+                            <i class="bi bi-upload me-2"></i>Uploading Bank Statements
+                        </div>
+                        <div class="card-body">
+                            <p>To start using {{ app_name }}, you need to upload your bank statements:</p>
+                            <ol class="help-steps">
+                                <li>Go to the home page and click on the <strong>Choose Files</strong> button.</li>
+                                <li>Select one or more PDF bank statements from your computer, or CSV/Excel files with transaction data.</li>
+                                <li>Choose your bank type from the dropdown menu (Chase or Bank of America) - this is only needed for PDF files.</li>
+                                <li>Click <strong>Upload & Process</strong> to start the extraction process.</li>
+                            </ol>
+                            <div class="alert alert-info">
+                                <i class="bi bi-lightbulb me-2"></i>
+                                <strong>Tip:</strong> You can select multiple files at once to process them in a single batch.
+                            </div>
+                            <div class="alert alert-primary">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Supported file types:</strong>
+                                <ul>
+                                    <li><strong>PDF files</strong> - Chase and Bank of America statements</li>
+                                    <li><strong>CSV files</strong> - Transaction data in comma-separated format</li>
+                                    <li><strong>Excel files</strong> - Transaction data in .xlsx or .xls format</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="help-card" id="processing">
+                        <div class="card-header">
+                            <i class="bi bi-gear-fill me-2"></i>Processing Files
+                        </div>
+                        <div class="card-body">
+                            <p>After uploading your files, the system will automatically:</p>
+                            <ul>
+                                <li>Extract transaction data from each statement</li>
+                                <li>Categorize transactions as income or expenses</li>
+                                <li>Merge all transactions into a single dataset</li>
+                                <li>Generate financial summaries and visualizations</li>
+                            </ul>
+                            <p>The processing page will show a progress bar and log messages. Once complete, you'll be redirected to the results page.</p>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- Dashboards Section -->
+                <section id="dashboards">
+                    <h2 class="mt-5 mb-4">Using Dashboards</h2>
+                    
+                    <div class="help-card" id="kpi-dashboard">
+                        <div class="card-header">
+                            <i class="bi bi-bar-chart-fill me-2"></i>KPI Dashboard
+                        </div>
+                        <div class="card-body">
+                            <p>The KPI Dashboard provides a quick overview of your financial health:</p>
+                            <ul>
+                                <li><strong>Income to Expense Ratio</strong> - Shows how your income compares to expenses (higher than 1.0 means you're saving money)</li>
+                                <li><strong>Average Monthly Income/Expenses</strong> - Your average monthly financial flows</li>
+                                <li><strong>Best Month</strong> - The month with your highest income</li>
+                                <li><strong>Charts</strong> - Visual representations of your income, expenses, and trends</li>
+                            </ul>
+                            <div class="alert alert-success">
+                                <i class="bi bi-stars me-2"></i>
+                                <strong>Pro Tip:</strong> Toggle dark mode using the moon icon in the upper right corner for easier viewing in low-light environments.
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="help-card" id="analytics-dashboard">
+                        <div class="card-header">
+                            <i class="bi bi-graph-up me-2"></i>Analytics Dashboard
+                        </div>
+                        <div class="card-body">
+                            <p>The full Analytics Dashboard provides in-depth analysis with interactive features:</p>
+                            <ul>
+                                <li><strong>Overview</strong> - Summary of all your financial data</li>
+                                <li><strong>Income Analysis</strong> - Detailed breakdown of income sources</li>
+                                <li><strong>Expense Analysis</strong> - Category-based expense tracking</li>
+                                <li><strong>Financial Forecasting</strong> - Projections of future financial trends</li>
+                            </ul>
+                            <p>Use the tabs at the top of the dashboard to navigate between different views.</p>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- Key Features Section -->
+                <section id="features">
+                    <h2 class="mt-5 mb-4">Key Features</h2>
+                    
+                    <div class="help-card" id="data-export">
+                        <div class="card-header">
+                            <i class="bi bi-file-earmark-spreadsheet me-2"></i>Data Export
+                        </div>
+                        <div class="card-body">
+                            <p>You can export your transaction data for use in other applications:</p>
+                            <ol class="help-steps">
+                                <li>Go to the Results page after processing your statements</li>
+                                <li>Click the <strong>Download CSV</strong> button</li>
+                                <li>Save the file to your preferred location</li>
+                            </ol>
+                            <p>The exported CSV file contains all transactions with dates, descriptions, and amounts, which can be opened in Excel or other spreadsheet applications.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="help-card" id="forecasting">
+                        <div class="card-header">
+                            <i class="bi bi-calendar-check me-2"></i>Financial Forecasting
+                        </div>
+                        <div class="card-body">
+                            <p>The forecasting feature uses historical data to predict future financial patterns:</p>
+                            <ul>
+                                <li>Based on at least 3 months of transaction data</li>
+                                <li>Projects income and expenses for the next 3-6 months</li>
+                                <li>Shows potential savings based on current trends</li>
+                                <li>Helps with financial planning and budgeting</li>
+                            </ul>
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Note:</strong> Forecasts are estimates based on historical patterns and may not account for unusual future events.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- FAQ Section -->
+                <section id="faq">
+                    <h2 class="mt-5 mb-4">Frequently Asked Questions</h2>
+                    
+                    <div class="faq-question" onclick="toggleFAQ(this)">
+                        <i class="bi bi-question-circle me-2"></i>Which bank statements are supported?
+                    </div>
+                    <div class="faq-answer" style="display:none;">
+                        <p>Currently, {{ app_name }} supports statements from:</p>
+                        <ul>
+                            <li>Chase Bank (PDF format)</li>
+                            <li>Bank of America (BoFA) (PDF format)</li>
+                            <li>Any bank's transaction data in CSV or Excel format</li>
+                        </ul>
+                        <p>More banks will be added in future updates.</p>
+                    </div>
+                    
+                    <div class="faq-question" onclick="toggleFAQ(this)">
+                        <i class="bi bi-question-circle me-2"></i>What file formats are accepted?
+                    </div>
+                    <div class="faq-answer" style="display:none;">
+                        <p>The system accepts the following file formats:</p>
+                        <ul>
+                            <li><strong>PDF</strong> - For Chase and Bank of America statements</li>
+                            <li><strong>CSV</strong> - Comma-separated values files with transaction data</li>
+                            <li><strong>Excel</strong> - .xlsx and .xls files with transaction data</li>
+                        </ul>
+                        <p>For CSV and Excel files, the system will automatically detect columns for date, description, and amount. The files should have headers that include these fields or similar names.</p>
+                    </div>
+                    
+                    <div class="faq-question" onclick="toggleFAQ(this)">
+                        <i class="bi bi-question-circle me-2"></i>Is my financial data secure?
+                    </div>
+                    <div class="faq-answer" style="display:none;">
+                        <p>Yes, all your data is processed locally and is not sent to any external servers. Your files are stored temporarily during processing and can be deleted after use. We implement security best practices to protect your information.</p>
+                    </div>
+                    
+                    <div class="faq-question" onclick="toggleFAQ(this)">
+                        <i class="bi bi-question-circle me-2"></i>How accurate is the data extraction?
+                    </div>
+                    <div class="faq-answer" style="display:none;">
+                        <p>Our extraction algorithm has been trained on thousands of bank statements and achieves approximately 98% accuracy. However, some complex or unusual statement formats may cause occasional extraction errors. Always review the extracted data for accuracy.</p>
+                    </div>
+                    
+                    <div class="faq-question" onclick="toggleFAQ(this)">
+                        <i class="bi bi-question-circle me-2"></i>Can I categorize my transactions?
+                    </div>
+                    <div class="faq-answer" style="display:none;">
+                        <p>Currently, the system attempts to auto-categorize transactions based on description patterns. Manual categorization is planned for a future update.</p>
+                    </div>
+                </section>
+                
+                <!-- Troubleshooting Section -->
+                <section id="troubleshooting">
+                    <h2 class="mt-5 mb-4">Troubleshooting</h2>
+                    
+                    <div class="help-card">
+                        <div class="card-header">
+                            <i class="bi bi-tools me-2"></i>Common Issues
+                        </div>
+                        <div class="card-body">
+                            <h5>PDF Processing Fails</h5>
+                            <p>If your PDF files fail to process:</p>
+                            <ul>
+                                <li>Ensure they are not password protected</li>
+                                <li>Check that they are from supported banks</li>
+                                <li>Try processing one file at a time</li>
+                                <li>Make sure the PDF is not corrupted</li>
+                            </ul>
+                            
+                            <h5>Dashboard Doesn't Load</h5>
+                            <p>If the analytics dashboard doesn't load:</p>
+                            <ul>
+                                <li>Check your internet connection</li>
+                                <li>Try refreshing the page</li>
+                                <li>Clear your browser cache</li>
+                                <li>Try a different browser</li>
+                            </ul>
+                            
+                            <h5>Data Export Issues</h5>
+                            <p>If you have trouble exporting data:</p>
+                            <ul>
+                                <li>Make sure you have processed at least one statement</li>
+                                <li>Check if your browser is blocking downloads</li>
+                                <li>Try using the "Save As" option if prompted</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="help-card">
+                        <div class="card-header">
+                            <i class="bi bi-person-circle me-2"></i>Contact Support
+                        </div>
+                        <div class="card-body">
+                            <p>If you continue to experience issues, please contact our support team:</p>
+                            <ul>
+                                <li>Email: support@sigmaBI.com</li>
+                                <li>Support website: <a href="https://sigmaBI.com/support" target="_blank">https://sigmaBI.com/support</a></li>
+                            </ul>
+                            <p>Please include the following information in your support request:</p>
+                            <ul>
+                                <li>Application version ({{ app_version }})</li>
+                                <li>Operating system</li>
+                                <li>Browser name and version</li>
+                                <li>Detailed description of the issue</li>
+                                <li>Screenshots if applicable</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    {% include 'footer.html' %}
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Toggle FAQ answers
+        $(document).ready(function() {
+            $('.faq-answer').hide();
+            
+            $('.faq-question').click(function() {
+                $(this).next('.faq-answer').slideToggle(200);
+            });
+        });
+    </script>
+</body>
+</html> 

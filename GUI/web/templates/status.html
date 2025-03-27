@@ -6,32 +6,112 @@
     <title>{{ app_name }} - Processing Status</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
+        :root {
+            /* Sigma theme colors */
+            --sigma-dark: #0a1929;
+            --sigma-primary: #1e3a8a;
+            --sigma-secondary: #0553b1;
+            --sigma-accent: #3984ff;
+            --sigma-highlight: #64b5f6;
+            --sigma-text: #e6f1ff;
+            --sigma-success: #00b894;
+            --sigma-danger: #ed4337;
+            --sigma-light-bg: #0f2942;
+            --sigma-card-bg: #162c41;
+            --sigma-border: #203e5a;
+        }
+        
         body {
             padding-top: 1.5rem;
             padding-bottom: 1.5rem;
+            background-color: var(--sigma-dark);
+            color: var(--sigma-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
         .header {
             padding-bottom: 1.5rem;
-            border-bottom: 1px solid #e5e5e5;
+            border-bottom: 1px solid var(--sigma-border);
             margin-bottom: 2rem;
         }
+        
         .progress {
             height: 25px;
             margin-bottom: 10px;
+            background-color: var(--sigma-light-bg);
         }
+        
+        .progress-bar {
+            background-color: var(--sigma-accent);
+        }
+        
         #statusMessage {
             margin-bottom: 20px;
+            background-color: rgba(57, 132, 255, 0.2);
+            border-color: var(--sigma-accent);
+            color: var(--sigma-text);
         }
+        
         .spinner-border {
             margin-right: 10px;
+            color: var(--sigma-highlight);
         }
+        
         .logo-img {
             height: 60px;
             margin-right: 15px;
         }
+        
         .header-content {
             display: flex;
             align-items: center;
+        }
+        
+        .card {
+            background-color: var(--sigma-card-bg);
+            border-color: var(--sigma-border);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background-color: var(--sigma-primary);
+            color: white;
+            border-bottom: 1px solid var(--sigma-border);
+            font-weight: 500;
+        }
+        
+        .lead {
+            color: #a0c0e0;
+        }
+        
+        #logContainer .border {
+            background-color: var(--sigma-light-bg) !important;
+            border-color: var(--sigma-border) !important;
+            color: var(--sigma-text);
+            font-family: monospace;
+            border-radius: 4px;
+        }
+        
+        .alert-success {
+            background-color: rgba(0, 184, 148, 0.2);
+            border-color: var(--sigma-success);
+            color: var(--sigma-text);
+        }
+        
+        .alert-danger {
+            background-color: rgba(237, 67, 55, 0.2);
+            border-color: var(--sigma-danger);
+            color: var(--sigma-text);
+        }
+        
+        h4 {
+            color: var(--sigma-highlight);
         }
     </style>
 </head>
@@ -55,7 +135,7 @@
                     </div>
                     <div class="card-body">
                         <div id="statusMessage" class="alert alert-info">
-                            <div class="spinner-border text-primary" role="status">
+                            <div class="spinner-border" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
                             <span id="statusText">Initializing...</span>
@@ -73,7 +153,7 @@
                         <!-- Log container for the old-style processing -->
                         <div id="logContainer" class="mt-4">
                             <h4>Processing Log:</h4>
-                            <div class="border p-3 bg-light" style="max-height: 300px; overflow-y: auto;">
+                            <div class="border p-3" style="max-height: 300px; overflow-y: auto;">
                                 {% for log in logs %}
                                     <div>{{ log }}</div>
                                 {% endfor %}

@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-.Python
 *.so
 .Python
 build/
@@ -20,6 +19,103 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Flask
+instance/
+.webassets-cache
+flask_session/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Distribution / packaging
+.Python
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Application specific
+GUI/web/uploads/*
+!GUI/web/uploads/.gitkeep
+GUI/web/logs/*
+!GUI/web/logs/.gitkeep
+GUI/web/output/*
+!GUI/web/output/.gitkeep
+CSV Files/*
+!CSV Files/.gitkeep
+
+# Sensitive/enviromental
+config.ini
+secrets.json
+.env
+env/
+.flaskenv
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
 # IDE
 .idea/

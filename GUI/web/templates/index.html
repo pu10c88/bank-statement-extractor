@@ -5,77 +5,192 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
     <style>
+        :root {
+            /* Sigma theme colors */
+            --sigma-dark: #0a1929;
+            --sigma-primary: #1e3a8a;
+            --sigma-secondary: #0553b1;
+            --sigma-accent: #3984ff;
+            --sigma-highlight: #64b5f6;
+            --sigma-text: #e6f1ff;
+            --sigma-success: #00b894;
+            --sigma-danger: #ed4337;
+            --sigma-light-bg: #0f2942;
+            --sigma-card-bg: #162c41;
+            --sigma-border: #203e5a;
+        }
+        
         body {
             padding-top: 1.5rem;
             padding-bottom: 1.5rem;
+            background-color: var(--sigma-dark);
+            color: var(--sigma-text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
         .header {
             padding-bottom: 1.5rem;
-            border-bottom: 1px solid #e5e5e5;
+            border-bottom: 1px solid var(--sigma-border);
             margin-bottom: 2rem;
         }
+        
         .form-control-file {
             margin-bottom: 1rem;
         }
+        
+        .card {
+            background-color: var(--sigma-card-bg);
+            border-color: var(--sigma-border);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background-color: var(--sigma-primary);
+            color: white;
+            border-bottom: 1px solid var(--sigma-border);
+            font-weight: 500;
+        }
+        
         .upload-area {
-            border: 2px dashed #ccc;
+            border: 2px dashed var(--sigma-border);
             border-radius: 10px;
             padding: 20px;
             text-align: center;
             margin-bottom: 20px;
             cursor: pointer;
+            background-color: var(--sigma-light-bg);
+            transition: all 0.3s ease;
         }
+        
         .upload-area:hover {
-            border-color: #666;
+            border-color: var(--sigma-accent);
+            background-color: rgba(57, 132, 255, 0.05);
         }
+        
         #file-list {
             margin-top: 15px;
         }
+        
         .file-item {
-            padding: 5px;
+            padding: 8px 12px;
             margin-bottom: 5px;
             border-radius: 5px;
-            background-color: #f8f9fa;
+            background-color: var(--sigma-light-bg);
+            color: var(--sigma-text);
+            border-left: 3px solid var(--sigma-accent);
         }
+        
         .summary-section {
             margin-top: 30px;
             display: none;
         }
+        
         .financial-card {
             margin-bottom: 15px;
             text-align: center;
+            border-radius: 8px;
+            overflow: hidden;
+            border: none;
         }
+        
         .financial-card .card-body {
             padding: 15px;
         }
+        
         .financial-card h5 {
             margin-bottom: 5px;
             font-size: 1rem;
+            opacity: 0.9;
         }
+        
         .financial-card h2 {
             font-size: 1.8rem;
             margin-bottom: 0;
+            font-weight: 600;
         }
+        
         .logo-img {
             height: 60px;
             margin-right: 15px;
         }
+        
         .header-content {
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
+        
         .header-content .title {
             display: flex;
             align-items: center;
         }
+        
         .header-content .actions {
             display: flex;
             align-items: center;
         }
+        
         .help-btn {
             margin-right: 15px;
+            color: var(--sigma-highlight);
+            border-color: var(--sigma-highlight);
+        }
+        
+        .help-btn:hover {
+            background-color: var(--sigma-highlight);
+            color: var(--sigma-dark);
+            border-color: var(--sigma-highlight);
+        }
+        
+        .btn-primary {
+            background-color: var(--sigma-primary);
+            border-color: var(--sigma-primary);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--sigma-secondary);
+            border-color: var(--sigma-secondary);
+        }
+        
+        .btn-success {
+            background-color: var(--sigma-success);
+            border-color: var(--sigma-success);
+        }
+        
+        .form-select, .form-control {
+            background-color: var(--sigma-light-bg);
+            border-color: var(--sigma-border);
+            color: var(--sigma-text);
+        }
+        
+        .form-select:focus, .form-control:focus {
+            background-color: var(--sigma-light-bg);
+            border-color: var(--sigma-accent);
+            box-shadow: 0 0 0 0.25rem rgba(57, 132, 255, 0.25);
+            color: var(--sigma-text);
+        }
+        
+        .alert-info {
+            background-color: rgba(57, 132, 255, 0.2);
+            border-color: var(--sigma-accent);
+            color: var(--sigma-text);
+        }
+        
+        .form-label {
+            color: var(--sigma-text);
+            font-weight: 500;
+        }
+        
+        .lead {
+            color: #a0c0e0;
         }
     </style>
 </head>
@@ -124,8 +239,8 @@
                             
                             <div class="mb-3">
                                 <div id="upload-area" class="upload-area">
-                                    <p>Drag & drop PDF files here or click to select files</p>
-                                    <input type="file" id="file-input" name="files[]" multiple accept=".pdf" style="display: none;">
+                                    <p>Drag & drop PDF, CSV or Excel files here or click to select files</p>
+                                    <input type="file" id="file-input" name="files[]" multiple accept=".pdf,.csv,.xlsx,.xls" style="display: none;">
                                     <button type="button" id="select-files-btn" class="btn btn-primary">Select Files</button>
                                 </div>
                                 <div id="file-list"></div>
@@ -147,7 +262,7 @@
                         <div class="card-body">
                             <div class="row">
                                 <div class="col-md-3">
-                                    <div class="card financial-card bg-light">
+                                    <div class="card financial-card bg-dark">
                                         <div class="card-body">
                                             <h5>Total Transactions</h5>
                                             <h2 id="total-transactions">0</h2>
@@ -155,7 +270,7 @@
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="card financial-card bg-success text-white">
+                                    <div class="card financial-card" style="background-color: var(--sigma-success);">
                                         <div class="card-body">
                                             <h5>Total Income</h5>
                                             <h2 id="total-income">$0.00</h2>
@@ -163,7 +278,7 @@
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="card financial-card bg-danger text-white">
+                                    <div class="card financial-card" style="background-color: var(--sigma-danger);">
                                         <div class="card-body">
                                             <h5>Total Expenses</h5>
                                             <h2 id="total-expenses">$0.00</h2>
@@ -171,7 +286,7 @@
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="card financial-card bg-primary text-white">
+                                    <div class="card financial-card" style="background-color: var(--sigma-secondary);">
                                         <div class="card-body">
                                             <h5>Net Profit</h5>
                                             <h2 id="net-profit">$0.00</h2>
@@ -201,17 +316,17 @@
 
         uploadArea.addEventListener('dragover', function(e) {
             e.preventDefault();
-            uploadArea.style.borderColor = '#666';
+            uploadArea.style.borderColor = 'var(--sigma-accent)';
         });
 
         uploadArea.addEventListener('dragleave', function(e) {
             e.preventDefault();
-            uploadArea.style.borderColor = '#ccc';
+            uploadArea.style.borderColor = 'var(--sigma-border)';
         });
 
         uploadArea.addEventListener('drop', function(e) {
             e.preventDefault();
-            uploadArea.style.borderColor = '#ccc';
+            uploadArea.style.borderColor = 'var(--sigma-border)';
             if (e.dataTransfer.files.length > 0) {
                 fileInput.files = e.dataTransfer.files;
                 updateFileList();
@@ -230,7 +345,18 @@
                 for (const file of fileInput.files) {
                     const fileItem = document.createElement('div');
                     fileItem.className = 'file-item';
-                    fileItem.textContent = file.name;
+                    
+                    // Add file type icon
+                    let fileIcon = '📄';
+                    if (file.name.toLowerCase().endsWith('.pdf')) {
+                        fileIcon = '📑';
+                    } else if (file.name.toLowerCase().endsWith('.csv')) {
+                        fileIcon = '📊';
+                    } else if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
+                        fileIcon = '📈';
+                    }
+                    
+                    fileItem.textContent = `${fileIcon} ${file.name}`;
                     fileList.appendChild(fileItem);
                 }
             }
