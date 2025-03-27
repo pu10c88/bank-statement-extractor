@@ -64,6 +64,18 @@
         .header-content {
             display: flex;
             align-items: center;
+            justify-content: space-between;
+        }
+        .header-content .title {
+            display: flex;
+            align-items: center;
+        }
+        .header-content .actions {
+            display: flex;
+            align-items: center;
+        }
+        .help-btn {
+            margin-right: 15px;
         }
     </style>
 </head>
@@ -71,10 +83,17 @@
     <div class="container">
         <div class="header">
             <div class="header-content">
-                <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="SIGMA BI Logo" class="logo-img">
-                <div>
-                    <h1>{{ app_name }}</h1>
-                    <p class="lead">Upload your bank statements to extract transaction data</p>
+                <div class="title">
+                    <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="SIGMA BI Logo" class="logo-img">
+                    <div>
+                        <h1>{{ app_name }}</h1>
+                        <p class="lead">Upload your bank statements to extract transaction data</p>
+                    </div>
+                </div>
+                <div class="actions">
+                    <a href="{{ url_for('help_page') }}" class="btn btn-outline-info help-btn">
+                        <i class="bi bi-question-circle"></i> Help
+                    </a>
                 </div>
             </div>
         </div>
@@ -229,9 +248,9 @@
                 let expenses = urlParams.get('expenses') || '0.00';
                 let profit = urlParams.get('profit') || '0.00';
                 
-                document.getElementById('total-income').textContent = '$' + income;
-                document.getElementById('total-expenses').textContent = '$' + expenses;
-                document.getElementById('net-profit').textContent = '$' + profit;
+                document.getElementById('total-income').textContent = income;
+                document.getElementById('total-expenses').textContent = expenses;
+                document.getElementById('net-profit').textContent = profit;
             }
         });
     </script>

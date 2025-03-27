@@ -69,4 +69,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Author
 
-Developed by SIGMA BI - Development Team 
+Developed by Paulo Loureiro Campos for Sigma Business Intelligence
+
+## Support
+
+For support, please contact: paulo.loureiro@sigmabusinessint.com 

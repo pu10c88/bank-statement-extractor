@@ -47,6 +47,18 @@
         .header-content {
             display: flex;
             align-items: center;
+            justify-content: space-between;
+        }
+        .header-content .title {
+            display: flex;
+            align-items: center;
+        }
+        .header-content .actions {
+            display: flex;
+            align-items: center;
+        }
+        .help-btn {
+            margin-right: 15px;
         }
     </style>
 </head>
@@ -54,10 +66,17 @@
     <div class="container">
         <div class="header">
             <div class="header-content">
-                <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="SIGMA BI Logo" class="logo-img">
-                <div>
-                    <h1>{{ app_name }}</h1>
-                    <p class="lead">Transaction Results</p>
+                <div class="title">
+                    <img src="{{ url_for('static', filename='images/icone_1.png') }}" alt="SIGMA BI Logo" class="logo-img">
+                    <div>
+                        <h1>Financial Results</h1>
+                        <p class="lead">Extracted transaction data and summary</p>
+                    </div>
+                </div>
+                <div class="actions">
+                    <a href="{{ url_for('help_page') }}" class="btn btn-outline-info help-btn">
+                        <i class="bi bi-question-circle"></i> Help
+                    </a>
                 </div>
             </div>
         </div>
@@ -91,7 +110,7 @@
                                 <div class="card financial-card bg-success text-white">
                                     <div class="card-body">
                                         <h5>Total Income</h5>
-                                        <h2>${{ income_total }}</h2>
+                                        <h2>{{ income_total }}</h2>
                                     </div>
                                 </div>
                             </div>
@@ -99,7 +118,7 @@
                                 <div class="card financial-card bg-danger text-white">
                                     <div class="card-body">
                                         <h5>Total Expenses</h5>
-                                        <h2>${{ expense_total }}</h2>
+                                        <h2>{{ expense_total }}</h2>
                                     </div>
                                 </div>
                             </div>
@@ -107,7 +126,7 @@
                                 <div class="card financial-card bg-primary text-white">
                                     <div class="card-body">
                                         <h5>Net Profit</h5>
-                                        <h2>${{ net_profit }}</h2>
+                                        <h2>{{ net_profit }}</h2>
                                     </div>
                                 </div>
                             </div>
@@ -115,15 +134,26 @@
                         
                         <!-- Action Buttons for Analysis and Download -->
                         <div class="mt-3">
+                            {% if transactions|length < 35 %}
+                            <div class="alert alert-warning">
+                                <b>⚠️ Notice:</b> Only {{ transactions|length }} transactions detected from {{ uploaded_file_count|default('several') }} files. Please check if all your data has been properly processed.
+                            </div>
+                            {% endif %}
+                            
                             <div class="btn-toolbar">
                                 <div class="btn-group me-2">
                                     <a href="{{ url_for('download_csv', session_id=session_id) }}" class="btn btn-primary">
                                         <i class="bi bi-download"></i> Download CSV
                                     </a>
                                 </div>
-                                <div class="btn-group">
+                                <div class="btn-group me-2">
                                     <a href="{{ url_for('simple_streamlit', session_id=session_id) }}" class="btn btn-success">
                                         <i class="bi bi-bar-chart-fill"></i> KPI Dashboard
+                                    </a>
+                                </div>
+                                <div class="btn-group">
+                                    <a href="{{ url_for('reset_and_upload') }}" class="btn btn-secondary">
+                                        <i class="bi bi-arrow-left"></i> Upload New Files
                                     </a>
                                 </div>
                             </div>

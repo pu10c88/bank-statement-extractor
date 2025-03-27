@@ -1,16 +1,16 @@
 Bank Statement Extractor - End User License Agreement
 
-Copyright (C) 2024 SIGMA BI - Development Team
+Copyright (C) 2024 Paulo Loureiro Campos, Sigma Business Intelligence
 
 This software is provided as-is, without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
 
 TERMS AND CONDITIONS
 
 1. AUTHORIZATION
-   This End User License Agreement ("EULA") is a legal agreement between you (either an individual or an entity) and SIGMA BI - Development Team regarding your use of Bank Statement Extractor.
+   This End User License Agreement ("EULA") is a legal agreement between you (either an individual or an entity) and Sigma Business Intelligence regarding your use of Bank Statement Extractor.
 
 2. LICENSE GRANT
-   SIGMA BI - Development Team grants you a non-exclusive, non-transferable license to use the software for your personal or business use.
+   Sigma Business Intelligence grants you a non-exclusive, non-transferable license to use the software for your personal or business use.
 
 3. RESTRICTIONS
    You may not:
@@ -19,18 +19,21 @@ TERMS AND CONDITIONS
    c) Use the software for any illegal purpose or in violation of any local, state, national, or international law.
 
 4. OWNERSHIP
-   The software is owned and copyrighted by SIGMA BI - Development Team. Your license gives you the right to use the software but does not transfer ownership of the software to you.
+   The software is owned and copyrighted by Paulo Loureiro Campos and Sigma Business Intelligence. Your license gives you the right to use the software but does not transfer ownership of the software to you.
 
 5. TERMINATION
    This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any term of this EULA.
 
 6. DISCLAIMER OF WARRANTIES
-   To the maximum extent permitted by applicable law, the software is provided "as is" and SIGMA BI - Development Team disclaims all warranties, either express or implied, including but not limited to implied warranties of merchantability and fitness for a particular purpose.
+   To the maximum extent permitted by applicable law, the software is provided "as is" and Sigma Business Intelligence disclaims all warranties, either express or implied, including but not limited to implied warranties of merchantability and fitness for a particular purpose.
 
 7. LIMITATION OF LIABILITY
-   To the maximum extent permitted by applicable law, in no event shall SIGMA BI - Development Team be liable for any special, incidental, indirect, or consequential damages whatsoever arising out of the use of or inability to use the software.
+   To the maximum extent permitted by applicable law, in no event shall Sigma Business Intelligence be liable for any special, incidental, indirect, or consequential damages whatsoever arising out of the use of or inability to use the software.
 
 8. ENTIRE AGREEMENT
-   This EULA constitutes the entire agreement between you and SIGMA BI - Development Team relating to the software and supersedes all prior or contemporaneous oral or written communications, proposals, and representations with respect to the software.
+   This EULA constitutes the entire agreement between you and Sigma Business Intelligence relating to the software and supersedes all prior or contemporaneous oral or written communications, proposals, and representations with respect to the software.
+
+9. CONTACT INFORMATION
+   For questions about this EULA or to contact the developer, please email: paulo.loureiro@sigmabusinessint.com
 
 By installing or using the Bank Statement Extractor, you acknowledge that you have read this agreement, understand it, and agree to be bound by its terms and conditions. 

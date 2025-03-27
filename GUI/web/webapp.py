@@ -2,10 +2,14 @@ import os
 import tempfile
 import sys
 from pathlib import Path
+from functools import wraps
+import multiprocessing
+import subprocess
+import atexit  # Add atexit for cleanup when app exits
 
 # App information
 APP_NAME = "Bank Statement Extractor"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"  # Updated version number
 APP_AUTHOR = "SIGMA BI - Development Team"
 
 # Add the Extractor Files directory to the system path - Fix the absolute path
@@ -22,8 +26,10 @@ import uuid
 import json
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
+from flask_wtf.csrf import CSRFProtect  # Import CSRF protection
+from werkzeug.exceptions import HTTPException
 
 # Force matplotlib to use non-interactive backend (for any image generation needs)
 import matplotlib
@@ -38,9 +44,30 @@ from chase_statements_load import load_pdf as chase_load_pdf
 from chase_statements_load import merge_csv_files
 from bofa_statements_load import load_pdf as bofa_load_pdf
 
-app = Flask(__name__)
-app.secret_key = "bank_extractor_secret_key"
+# Initialize Flask app with static folder configuration
+static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+if not os.path.exists(static_folder):
+    os.makedirs(os.path.join(static_folder, 'images'), exist_ok=True)
+
+app = Flask(__name__, static_folder=static_folder, static_url_path='/static')
+app.secret_key = os.environ.get('SECRET_KEY', "bank_extractor_secret_key")
+
+# Set session timeout to 30 minutes
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
+
+# Ensure logo file exists
+logo_path = os.path.join(static_folder, 'images', 'icone_1.png')
+if not os.path.exists(logo_path):
+    # Try to copy from Logos directory
+    logos_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../Logos'))
+    source_logo = os.path.join(logos_dir, 'icone_1.png')
+    if os.path.exists(source_logo):
+        shutil.copy(source_logo, logo_path)
+        print(f"Copied logo from {source_logo} to {logo_path}")
+    else:
+        print(f"Warning: Logo file not found at {source_logo}")
 
 # Set APP_ROOT for file path references
 app.config['APP_ROOT'] = os.path.dirname(os.path.abspath(__file__))
@@ -64,17 +91,202 @@ os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 processing_status = {}
 processing_logs = {}
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename=os.path.join(app.config['OUTPUT_FOLDER'], 'app.log')
-)
+# Configure enhanced logging
+LOG_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 'logs'))
+os.makedirs(LOG_FOLDER, exist_ok=True)
+
+# Create a custom formatter for the logs
+class CustomFormatter(logging.Formatter):
+    def format(self, record):
+        if record.levelno == logging.ERROR:
+            return f"⚠️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR - {record.getMessage()}"
+        elif record.levelno == logging.WARNING:
+            return f"⚡ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - WARNING - {record.getMessage()}"
+        else:
+            return f"ℹ️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - {record.getMessage()}"
+
+# Set up file handler
+file_handler = logging.FileHandler(os.path.join(LOG_FOLDER, 'app.log'))
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(CustomFormatter())
+
+# Set up console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(CustomFormatter())
+
+# Configure the logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # In-memory storage for job status
 processing_jobs = {}
 progress_data = {}
+active_streamlit_processes = {}  # Store active Streamlit processes
+
+# Store active sessions and their files
+active_sessions = set()
+
+# Add this function to clean up all files when the application is closed
+def cleanup_all_files():
+    """Clean up all files from uploads and CSV directories"""
+    logger.info(f"Application shutting down. Cleaning up all files and sessions...")
+    try:
+        # Clean up all sessions first
+        for session_id in list(active_sessions):
+            try:
+                cleanup_session_files(session_id)
+            except Exception as e:
+                logger.error(f"Error cleaning up session {session_id}: {str(e)}")
+        
+        # Then clean up main directories
+        
+        # Clean up uploads directory
+        uploads_dir = app.config['UPLOAD_FOLDER']
+        if os.path.exists(uploads_dir):
+            try:
+                # First remove all files in subdirectories
+                for root, dirs, files in os.walk(uploads_dir, topdown=False):
+                    for file in files:
+                        try:
+                            os.remove(os.path.join(root, file))
+                            logger.info(f"Removed file: {os.path.join(root, file)}")
+                        except Exception as e:
+                            logger.error(f"Error deleting file {os.path.join(root, file)}: {str(e)}")
+                
+                # Then remove all subdirectories
+                for root, dirs, files in os.walk(uploads_dir, topdown=False):
+                    for dir in dirs:
+                        try:
+                            dir_path = os.path.join(root, dir)
+                            os.rmdir(dir_path)
+                            logger.info(f"Removed directory: {dir_path}")
+                        except Exception as e:
+                            logger.error(f"Error removing directory {os.path.join(root, dir)}: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error cleaning uploads directory: {str(e)}")
+        
+        # Clean up CSV directory
+        csv_dir = app.config['CSV_FOLDER']
+        if os.path.exists(csv_dir):
+            try:
+                # First remove all files in subdirectories
+                for root, dirs, files in os.walk(csv_dir, topdown=False):
+                    for file in files:
+                        try:
+                            os.remove(os.path.join(root, file))
+                            logger.info(f"Removed file: {os.path.join(root, file)}")
+                        except Exception as e:
+                            logger.error(f"Error deleting file {os.path.join(root, file)}: {str(e)}")
+                
+                # Then remove all subdirectories
+                for root, dirs, files in os.walk(csv_dir, topdown=False):
+                    for dir in dirs:
+                        try:
+                            dir_path = os.path.join(root, dir)
+                            os.rmdir(dir_path)
+                            logger.info(f"Removed directory: {dir_path}")
+                        except Exception as e:
+                            logger.error(f"Error removing directory {os.path.join(root, dir)}: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error cleaning CSV directory: {str(e)}")
+                
+        # Clean up output directory
+        output_dir = app.config['OUTPUT_FOLDER']
+        if os.path.exists(output_dir):
+            try:
+                # First remove all files in subdirectories
+                for root, dirs, files in os.walk(output_dir, topdown=False):
+                    for file in files:
+                        try:
+                            os.remove(os.path.join(root, file))
+                            logger.info(f"Removed file: {os.path.join(root, file)}")
+                        except Exception as e:
+                            logger.error(f"Error deleting file {os.path.join(root, file)}: {str(e)}")
+                
+                # Then remove all subdirectories
+                for root, dirs, files in os.walk(output_dir, topdown=False):
+                    for dir in dirs:
+                        try:
+                            dir_path = os.path.join(root, dir)
+                            os.rmdir(dir_path)
+                            logger.info(f"Removed directory: {dir_path}")
+                        except Exception as e:
+                            logger.error(f"Error removing directory {os.path.join(root, dir)}: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error cleaning output directory: {str(e)}")
+                
+        # Kill all remaining Streamlit processes
+        try:
+            import signal
+            for session_id, pids in active_streamlit_processes.items():
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                        logger.info(f"Terminated Streamlit process {pid}")
+                    except Exception as e:
+                        logger.warning(f"Could not terminate process {pid}: {str(e)}")
+            # Clear the streamlit processes dictionary
+            active_streamlit_processes.clear()
+        except Exception as e:
+            logger.error(f"Error terminating Streamlit processes: {str(e)}")
+        
+        # Clear all global session tracking data
+        active_sessions.clear()
+        processing_status.clear()
+        processing_logs.clear()
+        processing_jobs.clear()
+        progress_data.clear()
+        
+        logger.info("All files and sessions cleaned up successfully")
+    except Exception as e:
+        logger.error(f"Error in cleanup_all_files: {str(e)}")
+
+# Register the cleanup function to run when the app exits
+atexit.register(cleanup_all_files)
+
+# Replace the old cleanup_all_sessions function with our new comprehensive one
+def cleanup_all_sessions():
+    """Redirect to the more comprehensive cleanup_all_files function"""
+    cleanup_all_files()
+
+# Custom error handler for all exceptions
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the error
+    logger.error(f"Unhandled exception: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    # Handle HTTP exceptions differently
+    if isinstance(e, HTTPException):
+        return render_template('error.html', 
+                               error_code=e.code,
+                               error_name=e.name,
+                               error_description=e.description,
+                               app_name=APP_NAME,
+                               app_version=APP_VERSION,
+                               app_author=APP_AUTHOR), e.code
+    
+    # Handle all other exceptions
+    return render_template('error.html', 
+                           error_code=500,
+                           error_name="Internal Server Error",
+                           error_description=str(e),
+                           app_name=APP_NAME,
+                           app_version=APP_VERSION,
+                           app_author=APP_AUTHOR), 500
+
+# A decorator to ensure user session is active
+def require_session(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'session_id' not in session:
+            flash("Your session has expired. Please start again.")
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Define functions that were previously imported from bank_extraction
 def get_bank_types():
@@ -142,6 +354,15 @@ def process_bank_statement(file_path, bank_type, output_dir):
 @app.route('/')
 def index():
     session_id = get_session_id()
+    
+    # Add current session to active sessions
+    active_sessions.add(session_id)
+    
+    # Clear existing files when loading the initial page
+    try:
+        cleanup_session_files(session_id)
+    except Exception as e:
+        logger.error(f"Error clearing files for session {session_id}: {str(e)}")
     
     # Check if we need to display financial summary
     show_summary = request.args.get('show_summary', 'false') == 'true'
@@ -246,141 +467,62 @@ def status_data(session_id):
 
 @app.route('/results/<session_id>')
 def results(session_id):
+    """Show processing results"""
     session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+    output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
     
-    if not os.path.exists(session_csv_dir):
-        flash('No results found for this session')
-        return redirect(url_for('index'))
+    # Ensure directories exist
+    os.makedirs(session_csv_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Get all CSV files
-    csv_files = [f for f in os.listdir(session_csv_dir) if f.endswith('.csv')]
-    
-    # Check if all_transactions.csv exists
-    has_merged = 'all_transactions.csv' in csv_files
-    csv_files = [f for f in csv_files if f != 'all_transactions.csv'] 
-    
-    # Variables for the template
+    # Check for all_transactions.csv file
+    all_transactions_file = os.path.join(session_csv_dir, 'all_transactions.csv')
     transactions = []
-    income_total = "0.00"
-    expense_total = "0.00"
-    net_profit = "0.00"
     
-    # Get transactions and summary information if merged file exists
-    summary = None
-    if has_merged:
+    if os.path.exists(all_transactions_file):
         try:
-            all_transactions_path = os.path.join(session_csv_dir, 'all_transactions.csv')
-            df = pd.read_csv(all_transactions_path)
-            
-            # Add transaction type if not present
-            if 'type' not in df.columns:
-                df['type'] = df.apply(lambda row: 'credit' if float(row['amount']) >= 0 else 'debit', axis=1)
-                # Save the updated dataframe with the type column
-                df.to_csv(all_transactions_path, index=False)
-            
-            # Load transactions for the template
+            df = pd.read_csv(all_transactions_file)
             transactions = df.to_dict('records')
-            
-            # Basic summary
-            total_transactions = len(df)
-            
-            if 'amount' in df.columns:
-                deposits = df[df['amount'] > 0]['amount'].sum()
-                withdrawals = abs(df[df['amount'] < 0]['amount'].sum())
-                net_change = deposits - withdrawals
-                
-                # Update template variables
-                income_total = format_currency(deposits).replace('$', '')
-                expense_total = format_currency(withdrawals).replace('$', '')
-                net_profit = format_currency(net_change).replace('$', '')
-                
-                # Monthly breakdown
-                df['date'] = pd.to_datetime(df['date'])
-                df['month'] = df['date'].dt.strftime('%Y-%m')
-                
-                # Simplified monthly aggregation to avoid MultiIndex issues
-                monthly_data = []
-                for month_name in sorted(df['month'].unique(), reverse=True):
-                    month_df = df[df['month'] == month_name]
-                    count = len(month_df)
-                    total = month_df['amount'].sum()
-                    
-                    # Calculate monthly income and expenses
-                    month_income = month_df[month_df['amount'] > 0]['amount'].sum()
-                    month_expenses = abs(month_df[month_df['amount'] < 0]['amount'].sum())
-                    
-                    monthly_data.append({
-                        'month': month_name,
-                        'count': count,
-                        'total': round(total, 2),
-                        'total_formatted': format_currency(total),
-                        'income': round(month_income, 2),
-                        'income_formatted': format_currency(month_income),
-                        'expenses': round(month_expenses, 2),
-                        'expenses_formatted': format_currency(month_expenses)
-                    })
-                
-                summary = {
-                    'total_transactions': total_transactions,
-                    'deposits': round(deposits, 2),
-                    'deposits_formatted': format_currency(deposits),
-                    'withdrawals': round(withdrawals, 2),
-                    'withdrawals_formatted': format_currency(withdrawals),
-                    'net_change': round(net_change, 2),
-                    'net_change_formatted': format_currency(net_change),
-                    'monthly': monthly_data
-                }
         except Exception as e:
-            flash(f'Error generating summary: {str(e)}')
-            app.logger.error(f"Error reading transactions: {str(e)}")
-            print(f"Error reading transactions: {str(e)}")
+            flash(f"Error loading transactions: {str(e)}")
+            logger.error(f"Error loading transactions: {str(e)}")
     
-    # If no merged file exists, try to load from individual CSVs
-    elif csv_files:
-        try:
-            all_transactions = []
-            
-            for csv_file in csv_files:
-                csv_path = os.path.join(session_csv_dir, csv_file)
-                df = pd.read_csv(csv_path)
-                
-                # Add transaction type if not present
-                if 'type' not in df.columns:
-                    df['type'] = df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
-                
-                all_transactions.extend(df.to_dict('records'))
-            
-            if all_transactions:
-                transactions = all_transactions
-                
-                # Calculate totals
-                income = sum(float(t['amount']) for t in transactions if float(t['amount']) >= 0)
-                expenses = sum(abs(float(t['amount'])) for t in transactions if float(t['amount']) < 0)
-                profit = income - expenses
-                
-                income_total = format_currency(income).replace('$', '')
-                expense_total = format_currency(expenses).replace('$', '')
-                net_profit = format_currency(profit).replace('$', '')
-        except Exception as e:
-            flash(f'Error loading individual CSV files: {str(e)}')
-            print(f"Error reading individual CSVs: {str(e)}")
+    # Count individual transaction files (CSV files that aren't all_transactions.csv)
+    uploaded_file_count = 0
+    try:
+        for file in os.listdir(session_csv_dir):
+            if file.endswith('.csv') and file != 'all_transactions.csv':
+                uploaded_file_count += 1
+    except Exception as e:
+        logger.error(f"Error counting CSV files: {str(e)}")
     
-    # Prepare template variables
-    template_vars = {
-        'session_id': session_id,
-        'csv_files': csv_files,
-        'has_merged': has_merged,
-        'summary': summary,
-        'transactions': transactions,
-        'income_total': income_total,
-        'expense_total': expense_total,
-        'net_profit': net_profit,
-        'csv_file': 'all_transactions.csv' if has_merged else None,
-        'app_name': APP_NAME,
-        'app_version': APP_VERSION,
-        'app_author': APP_AUTHOR
-    }
-    return render_template('results.html', **template_vars)
+    # Generate summary data
+    summary = create_transaction_summary(transactions)
+    
+    # Calculate totals
+    total_income = sum(transaction['amount'] for transaction in transactions if transaction['amount'] > 0)
+    total_expenses = sum(abs(transaction['amount']) for transaction in transactions if transaction['amount'] < 0)
+    net_profit = total_income - total_expenses
+    
+    # Format currency values
+    income_total = format_currency(total_income)
+    expense_total = format_currency(total_expenses)
+    net_profit_formatted = format_currency(net_profit)
+    
+    # Add standard template variables
+    template_vars = get_template_vars()
+    
+    return render_template(
+        'results.html',
+        transactions=transactions,
+        session_id=session_id,
+        summary=summary,
+        income_total=income_total,
+        expense_total=expense_total,
+        net_profit=net_profit_formatted,
+        uploaded_file_count=uploaded_file_count,
+        **template_vars
+    )
 
 @app.route('/download/<session_id>/<filename>')
 def download_file(session_id, filename):
@@ -396,61 +538,90 @@ def download_file(session_id, filename):
 @app.route('/merge/<session_id>')
 def merge_files(session_id):
     # Get the directory of CSV files for the session
-    session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+    session_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+    output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
     
-    if not os.path.exists(session_csv_dir):
-        flash('No CSV files found for this session')
-        return redirect(url_for('index'))
+    # Ensure output directory exists
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
     
-    # Get all CSV files in the session directory
-    csv_files = [f for f in os.listdir(session_csv_dir) if f.endswith('.csv') and f != 'all_transactions.csv']
-    
-    if not csv_files:
-        flash('No CSV files found for merging')
+    # Check if the directory exists
+    if not os.path.exists(session_dir):
+        flash(f"No CSV files found for session {session_id}")
         return redirect(url_for('results', session_id=session_id))
     
     try:
-        # Merge all CSV files into one
-        merged_data = []
-        for csv_file in csv_files:
-            file_path = os.path.join(session_csv_dir, csv_file)
-            try:
-                df = pd.read_csv(file_path)
-                
-                # Ensure 'type' column exists with proper values
-                if 'type' not in df.columns:
-                    df['type'] = df.apply(lambda row: 'credit' if float(row['amount']) >= 0 else 'debit', axis=1)
-                else:
-                    # Make sure existing type values are correct
-                    df['type'] = df.apply(lambda row: 'credit' if float(row['amount']) >= 0 else 'debit', axis=1)
-                
-                merged_data.append(df)
-                app.logger.info(f"Added {len(df)} rows from {csv_file}")
-            except Exception as e:
-                app.logger.error(f"Error reading {csv_file}: {str(e)}")
+        # Force cleanup of previous merged file
+        all_transactions_path = os.path.join(session_dir, 'all_transactions.csv')
+        output_transactions_path = os.path.join(output_dir, 'all_transactions.csv')
         
-        if not merged_data or len(merged_data) == 0:
-            flash('No valid data found in CSV files')
+        # Delete any existing merged file to ensure complete reprocessing
+        if os.path.exists(all_transactions_path):
+            try:
+                os.remove(all_transactions_path)
+                logger.info(f"Removed existing merged file: {all_transactions_path}")
+            except Exception as e:
+                logger.warning(f"Could not remove existing file {all_transactions_path}: {str(e)}")
+                
+        if os.path.exists(output_transactions_path):
+            try:
+                os.remove(output_transactions_path)
+                logger.info(f"Removed existing merged file: {output_transactions_path}")
+            except Exception as e:
+                logger.warning(f"Could not remove existing file {output_transactions_path}: {str(e)}")
+        
+        # Find all CSV files in the session directory
+        csv_files = []
+        for file in os.listdir(session_dir):
+            if file.endswith('.csv') and file != 'all_transactions.csv':
+                csv_files.append(os.path.join(session_dir, file))
+        
+        if not csv_files:
+            flash("No CSV files found to merge")
+            return redirect(url_for('results', session_id=session_id))
+        
+        # Use pandas to load and merge all CSV files
+        all_transactions = []
+        for file in csv_files:
+            try:
+                df = pd.read_csv(file)
+                if not df.empty:
+                    all_transactions.append(df)
+            except Exception as e:
+                logger.error(f"Error loading {os.path.basename(file)}: {str(e)}")
+        
+        if not all_transactions:
+            flash("No valid transactions found in any of the processed files")
             return redirect(url_for('results', session_id=session_id))
         
         # Concatenate all dataframes
-        merged_df = pd.concat(merged_data, ignore_index=True)
-        app.logger.info(f"Merged {len(merged_df)} total transactions")
+        combined_df = pd.concat(all_transactions, ignore_index=True)
         
-        # Sort transactions by date (newest first)
-        merged_df['date'] = pd.to_datetime(merged_df['date'])
-        merged_df = merged_df.sort_values('date', ascending=False)
-        merged_df['date'] = merged_df['date'].dt.strftime('%Y-%m-%d')
+        # Ensure date column is in datetime format
+        if 'date' in combined_df.columns:
+            combined_df['date'] = pd.to_datetime(combined_df['date'], errors='coerce')
+            
+            # Sort by date
+            combined_df = combined_df.sort_values('date')
+            
+            # Convert back to string format for storage
+            combined_df['date'] = combined_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Save the merged data to a new CSV file
-        output_file = os.path.join(session_csv_dir, 'all_transactions.csv')
-        merged_df.to_csv(output_file, index=False)
-        app.logger.info(f"Saved merged transactions to {output_file}")
+        # Add transaction type if not present
+        if 'type' not in combined_df.columns:
+            combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
         
-        flash('Files merged successfully! You can now download the combined CSV file.')
+        # Save to CSV in both locations
+        combined_df.to_csv(all_transactions_path, index=False)
+        combined_df.to_csv(output_transactions_path, index=False)
+        
+        transaction_count = len(combined_df)
+        flash(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
+        
     except Exception as e:
-        app.logger.error(f"Error merging files: {str(e)}")
-        flash(f'Error merging files: {str(e)}')
+        logger.error(f"Error merging CSV files: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash(f"Error merging CSV files: {str(e)}")
     
     return redirect(url_for('results', session_id=session_id))
 
@@ -574,28 +745,27 @@ def debug_paths(session_id):
 def load_transactions_data(session_id):
     """Load transaction data from various possible locations"""
     try:
-        # Check multiple possible locations for transaction data
+        # Check for actual user transaction data in the session output directories
         possible_paths = [
             os.path.join(app.config['CSV_FOLDER'], session_id, 'all_transactions.csv'),
             os.path.join(app.config['OUTPUT_FOLDER'], session_id, 'all_transactions.csv'),
-            # Fallback to demo data if needed (for testing)
-            os.path.join(app.config['APP_ROOT'], 'static', 'demo_data', 'all_transactions.csv')
         ]
         
         transactions_file = None
         for path in possible_paths:
             if os.path.exists(path):
                 transactions_file = path
-                logger.info(f"Found transaction data at: {path}")
+                logger.info(f"Found user transaction data at: {path}")
                 break
         
         if not transactions_file:
-            logger.error(f"No transaction data found. Searched paths: {possible_paths}")
+            logger.error(f"No transaction data found for session {session_id}. Searched paths: {possible_paths}")
+            flash("No transaction data found. Please upload bank statements first.", "warning")
             return pd.DataFrame()  # Return empty DataFrame
         
         # Load the data
         df = pd.read_csv(transactions_file)
-        logger.info(f"Loaded {len(df)} transactions from {transactions_file}")
+        logger.info(f"Loaded {len(df)} user transactions from {transactions_file}")
         
         # Ensure amount is numeric
         if 'amount' in df.columns:
@@ -632,164 +802,205 @@ def format_currency(amount):
     return f"${amount:,.2f}"
 
 def process_pdfs(directory, bank_type, session_id):
-    pdf_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.pdf')]
-    total_files = len(pdf_files)
-    
-    if total_files == 0:
-        processing_status[session_id]['status'] = 'completed'
-        processing_status[session_id]['progress'] = 100
-        log_message(session_id, "No PDF files found in the uploaded files.")
-        return
-    
-    # Create session-specific output directory
-    session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
-    os.makedirs(session_csv_dir, exist_ok=True)
-    
-    log_message(session_id, f"Processing {total_files} PDF files...")
-    log_message(session_id, f"Output CSV files will be saved to: {session_csv_dir}")
-    
-    processed_count = 0
-    error_count = 0
-    total_transactions = 0
-    total_deposits = 0
-    total_withdrawals = 0
-    
-    for i, pdf_file in enumerate(pdf_files):
-        try:
-            filename = os.path.basename(pdf_file)
-            log_message(session_id, f"Loading PDF: {filename}...")
-            
-            try:
-                # Load PDF based on selected bank
-                if bank_type == 'chase':
-                    df = chase_load_pdf(pdf_file)
-                else:
-                    df = bofa_load_pdf(pdf_file)
-                
-                if df.empty:
-                    log_message(session_id, f"⚠️ No transactions found in {filename}")
-                    continue
-            except Exception as bank_error:
-                # If the selected bank fails, try the other bank format
-                log_message(session_id, f"⚠️ Error processing as {bank_type}: {str(bank_error)}")
-                log_message(session_id, f"Attempting to process with alternative bank format...")
-                
-                try:
-                    if bank_type == 'chase':
-                        df = bofa_load_pdf(pdf_file)
-                    else:
-                        df = chase_load_pdf(pdf_file)
-                    
-                    if df.empty:
-                        log_message(session_id, f"⚠️ No transactions found with alternative format in {filename}")
-                        continue
-                    
-                    log_message(session_id, f"✓ Successfully extracted using alternative bank format")
-                except Exception as alt_error:
-                    raise Exception(f"Failed with both bank formats. Original error: {str(bank_error)}, Alternative error: {str(alt_error)}")
-            
-            # Add transaction type if not present
-            if 'type' not in df.columns:
-                df['type'] = df.apply(lambda row: 'credit' if float(row['amount']) >= 0 else 'debit', axis=1)
-            
-            log_message(session_id, f"✓ Successfully extracted {len(df)} transactions")
-            
-            # Calculate and display statistics
-            if 'amount' in df.columns:
-                deposits_df = df[df['amount'] > 0]
-                statement_deposits = deposits_df['amount'].sum()
-                total_deposits += statement_deposits
-                log_message(session_id, f"✓ Statement deposits: {format_currency(statement_deposits)} ({len(deposits_df)} transactions)")
-                
-                withdrawals_df = df[df['amount'] < 0]
-                statement_withdrawals = abs(withdrawals_df['amount'].sum())
-                total_withdrawals += statement_withdrawals
-                log_message(session_id, f"✓ Statement withdrawals: {format_currency(statement_withdrawals)} ({len(withdrawals_df)} transactions)")
-                log_message(session_id, f"✓ Statement net change: {format_currency(statement_deposits - statement_withdrawals)}")
-            else:
-                log_message(session_id, f"⚠️ Warning: No 'amount' column found in extracted data")
-            
-            # Update running totals
-            total_transactions += len(df)
-            
-            # Create output CSV filename
-            csv_file = os.path.join(session_csv_dir, os.path.splitext(filename)[0] + '.csv')
-            
-            # Standardize date format
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-                df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-            
-            # Save extracted transactions to CSV file
-            df.to_csv(csv_file, index=False)
-            log_message(session_id, f"✓ Saved to CSV: {os.path.basename(csv_file)}")
-            log_message(session_id, "-" * 50)
-            
-            # Increment counter for successfully processed files
-            processed_count += 1
-            
-        except Exception as e:
-            # If any error occurs during processing, catch and log it
-            error_msg = f"❌ Error processing {os.path.basename(pdf_file)}: {str(e)}"
-            log_message(session_id, error_msg)
-            log_message(session_id, "-" * 50)
-            error_count += 1
+    """Process all PDFs in the directory"""
+    try:
+        # Get list of files in the directory
+        files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.pdf')]
         
-        # Update progress
-        progress = int(((i + 1) / total_files) * 100)
-        processing_status[session_id]['progress'] = progress
+        # Update status
+        processing_status[session_id]['total_files'] = len(files)
+        processing_status[session_id]['processed'] = 0
+        processing_logs[session_id].append(f"Processing {len(files)} PDF files...")
+        
+        # Create session-specific CSV output directory
+        session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+        os.makedirs(session_csv_dir, exist_ok=True)
+        
+        # Create session-specific output directory
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Process each file
+        for i, file_path in enumerate(files):
+            try:
+                # Update progress
+                processing_status[session_id]['progress'] = ((i + 1) / len(files)) * 100
+                processing_status[session_id]['processed'] = i + 1
+                processing_logs[session_id].append(f"Processing {os.path.basename(file_path)}...")
+                
+                # Convert to Path object for better path handling
+                file_path_obj = Path(file_path)
+                output_csv_path = Path(session_csv_dir) / file_path_obj.with_suffix('.csv').name
+                
+                # Process based on bank type
+                if bank_type.lower() == 'chase':
+                    processing_logs[session_id].append(f"Using Chase bank statement processor...")
+                    # Process Chase statement
+                    df = chase_load_pdf(file_path_obj)
+                elif bank_type.lower() == 'bofa':
+                    processing_logs[session_id].append(f"Using Bank of America statement processor...")
+                    # Process Bank of America statement
+                    df = bofa_load_pdf(file_path_obj)
+                else:
+                    processing_logs[session_id].append(f"Unsupported bank type: {bank_type}")
+                    continue
+                
+                # Save transactions to CSV
+                if df is not None and not df.empty:
+                    df.to_csv(output_csv_path, index=False)
+                    processing_logs[session_id].append(f"Extracted {len(df)} transactions from {os.path.basename(file_path)}")
+                else:
+                    processing_logs[session_id].append(f"No transactions found in {os.path.basename(file_path)}")
+                
+                # Add brief pause to prevent UI freezing
+                time.sleep(0.1)
+            
+            except Exception as e:
+                error_message = f"Error processing {os.path.basename(file_path)}: {str(e)}"
+                processing_logs[session_id].append(error_message)
+                logger.error(error_message)
+                logger.error(traceback.format_exc())
+        
+        # Automatically merge all CSV files after processing
+        try:
+            processing_logs[session_id].append("Automatically merging all CSV files...")
+            # Find all CSV files in the session directory
+            csv_files = []
+            for file in os.listdir(session_csv_dir):
+                if file.endswith('.csv') and file != 'all_transactions.csv':
+                    csv_files.append(os.path.join(session_csv_dir, file))
+            
+            if csv_files:
+                # Merge all CSV files into one
+                all_transactions = []
+                for csv_file in csv_files:
+                    try:
+                        df = pd.read_csv(csv_file)
+                        if not df.empty:
+                            all_transactions.append(df)
+                    except Exception as e:
+                        processing_logs[session_id].append(f"Error loading {os.path.basename(csv_file)}: {str(e)}")
+                
+                if all_transactions:
+                    # Concatenate all dataframes
+                    combined_df = pd.concat(all_transactions, ignore_index=True)
+                    
+                    # Ensure date column is in datetime format
+                    if 'date' in combined_df.columns:
+                        combined_df['date'] = pd.to_datetime(combined_df['date'], errors='coerce')
+                        
+                        # Sort by date
+                        combined_df = combined_df.sort_values('date')
+                        
+                        # Convert back to string format for storage
+                        combined_df['date'] = combined_df['date'].dt.strftime('%Y-%m-%d')
+                    
+                    # Add transaction type if not present
+                    if 'type' not in combined_df.columns:
+                        combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
+                    
+                    # Save to CSV in both locations
+                    merged_file = os.path.join(session_csv_dir, 'all_transactions.csv')
+                    combined_df.to_csv(merged_file, index=False)
+                    
+                    output_merged_file = os.path.join(output_dir, 'all_transactions.csv')
+                    combined_df.to_csv(output_merged_file, index=False)
+                    
+                    transaction_count = len(combined_df)
+                    processing_logs[session_id].append(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
+                else:
+                    processing_logs[session_id].append("No valid transactions found in any of the processed files")
+            else:
+                processing_logs[session_id].append("No CSV files found to merge")
+        except Exception as e:
+            error_message = f"Error merging CSV files: {str(e)}"
+            processing_logs[session_id].append(error_message)
+            logger.error(error_message)
+            logger.error(traceback.format_exc())
+        
+        # Update final status
+        processing_status[session_id]['status'] = 'completed'
     
-    # Print summary
-    log_message(session_id, "\nProcess Completed!")
-    log_message(session_id, "-" * 50)
-    log_message(session_id, f"Successfully Processed: {processed_count} files")
-    log_message(session_id, f"Total Transactions Processed: {total_transactions}")
-    
-    # Display financial summary
-    net_profit = total_deposits - total_withdrawals
-    log_message(session_id, "-" * 50)
-    log_message(session_id, f"FINANCIAL SUMMARY:")
-    log_message(session_id, f"Total Income/Deposits: {format_currency(total_deposits)}")
-    log_message(session_id, f"Total Expenses/Withdrawals: {format_currency(total_withdrawals)}")
-    log_message(session_id, f"Net Profit: {format_currency(net_profit)}")
-    log_message(session_id, "-" * 50)
-    
-    log_message(session_id, f"Errors Encountered: {error_count} files")
-    
-    # Update processing status
-    processing_status[session_id]['status'] = 'completed'
-    processing_status[session_id]['processed_count'] = processed_count
-    processing_status[session_id]['error_count'] = error_count
-    processing_status[session_id]['total_transactions'] = total_transactions
-    processing_status[session_id]['income'] = round(total_deposits, 2)
-    processing_status[session_id]['expenses'] = round(total_withdrawals, 2)
-    processing_status[session_id]['profit'] = round(net_profit, 2)
-    processing_status[session_id]['income_formatted'] = format_currency(total_deposits)
-    processing_status[session_id]['expenses_formatted'] = format_currency(total_withdrawals)
-    processing_status[session_id]['profit_formatted'] = format_currency(net_profit)
+    except Exception as e:
+        error_message = f"Error during processing: {str(e)}"
+        processing_logs[session_id].append(error_message)
+        logger.error(error_message)
+        logger.error(traceback.format_exc())
+        processing_status[session_id]['status'] = 'error'
 
 def create_transaction_summary(transactions):
-    """Create a summary of the transactions"""
+    """Generate summary data from transactions list for the template"""
     if not transactions:
-        return None
+        return {
+            'total_transactions': 0,
+            'deposits': 0,
+            'deposits_formatted': format_currency(0),
+            'withdrawals': 0,
+            'withdrawals_formatted': format_currency(0),
+            'net_change': 0,
+            'net_change_formatted': format_currency(0),
+            'monthly': []
+        }
     
-    total_transactions = len(transactions)
+    # Convert to DataFrame for easier analysis
+    df = pd.DataFrame(transactions)
     
-    # Calculate the income and expenses
-    income = sum(float(t['amount']) for t in transactions if t['type'] == 'credit')
-    expenses = sum(float(t['amount']) for t in transactions if t['type'] == 'debit')
-    net_profit = income - expenses
+    # Basic summary
+    total_transactions = len(df)
     
-    # Format currency values with commas for thousands
-    income_formatted = f"{income:,.2f}"
-    expenses_formatted = f"{expenses:,.2f}"
-    net_profit_formatted = f"{net_profit:,.2f}"
+    if 'amount' in df.columns:
+        # Fix data types if needed
+        df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
+        
+        # Calculate metrics
+        deposits = df[df['amount'] > 0]['amount'].sum()
+        withdrawals = abs(df[df['amount'] < 0]['amount'].sum())
+        net_change = deposits - withdrawals
+        
+        # Monthly breakdown
+        try:
+            df['date'] = pd.to_datetime(df['date'])
+            df['month'] = df['date'].dt.strftime('%Y-%m')
+        
+            # Simplified monthly aggregation to avoid MultiIndex issues
+            monthly_data = []
+            for month_name in sorted(df['month'].unique(), reverse=True):
+                month_df = df[df['month'] == month_name]
+                count = len(month_df)
+                total = month_df['amount'].sum()
+                
+                # Calculate monthly income and expenses
+                month_income = month_df[month_df['amount'] > 0]['amount'].sum()
+                month_expenses = abs(month_df[month_df['amount'] < 0]['amount'].sum())
+                
+                monthly_data.append({
+                    'month': month_name,
+                    'count': count,
+                    'total': round(total, 2),
+                    'total_formatted': format_currency(total),
+                    'income': round(month_income, 2),
+                    'income_formatted': format_currency(month_income),
+                    'expenses': round(month_expenses, 2),
+                    'expenses_formatted': format_currency(month_expenses)
+                })
+        except Exception as e:
+            logger.error(f"Error creating monthly breakdown: {str(e)}")
+            monthly_data = []
+    else:
+        deposits = 0
+        withdrawals = 0
+        net_change = 0
+        monthly_data = []
     
     return {
         'total_transactions': total_transactions,
-        'income': income_formatted,
-        'expenses': expenses_formatted,
-        'net_profit': net_profit_formatted
+        'deposits': round(deposits, 2),
+        'deposits_formatted': format_currency(deposits),
+        'withdrawals': round(withdrawals, 2),
+        'withdrawals_formatted': format_currency(withdrawals),
+        'net_change': round(net_change, 2),
+        'net_change_formatted': format_currency(net_change),
+        'monthly': monthly_data
     }
 
 def get_template_vars():
@@ -872,330 +1083,832 @@ def process_files(job_id, files, bank_type, output_dir):
 def simple_streamlit(session_id):
     """Launch a Streamlit KPI dashboard with real data"""
     try:
-        # Use a fixed port for Streamlit to make it more reliable
+        # Find an available port between 8501-8510 for Streamlit
         streamlit_port = 8501
+        max_port = 8510
+        
+        # Check if we already have a running process for this session
+        if session_id in active_streamlit_processes:
+            logger.info(f"Reusing existing Streamlit process for session {session_id}")
+            # Just redirect to the existing dashboard
+            template_data = {
+                'streamlit_url': f"http://localhost:{streamlit_port}?embed=true",
+                'session_id': session_id,
+            }
+            return render_template('streamlit_dashboard.html', **template_data)
+        
+        # Check if port 8501 is already in use by another process
+        import socket
+        while streamlit_port <= max_port:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', streamlit_port))
+            sock.close()
+            if result != 0:  # Port is available
+                break
+            streamlit_port += 1
+            
+        if streamlit_port > max_port:
+            logger.error(f"No available ports found for Streamlit in range 8501-{max_port}")
+            flash("Unable to start Streamlit dashboard - all ports are busy. Please try again later.")
+            return redirect(url_for('results', session_id=session_id))
+            
         logger.info(f"Using port for Streamlit: {streamlit_port}")
         
-        # Create a Streamlit script that loads and analyzes real transaction data
-        streamlit_script = '''
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import os
-from datetime import datetime
-import calendar
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+        # Always use the standalone Streamlit dashboard
+        streamlit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'streamlit', 'financial_dashboard.py')
+        
+        if not os.path.exists(streamlit_path):
+            logger.error(f"Streamlit script not found at: {streamlit_path}")
+            flash("Streamlit dashboard file not found.")
+            return redirect(url_for('results', session_id=session_id))
+        
+        # Clean up Streamlit cache to ensure new data is loaded
+        streamlit_cache_dir = os.path.join(os.path.expanduser("~"), ".streamlit/cache")
+        if os.path.exists(streamlit_cache_dir):
+            try:
+                logger.info(f"Cleaning Streamlit cache directory: {streamlit_cache_dir}")
+                for cache_file in os.listdir(streamlit_cache_dir):
+                    file_path = os.path.join(streamlit_cache_dir, cache_file)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except Exception as e:
+                        logger.warning(f"Error cleaning cache file {file_path}: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error accessing Streamlit cache directory: {str(e)}")
+        
+        # Kill any existing Streamlit processes before starting a new one
+        try:
+            import signal
+            import psutil
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info['cmdline'] if proc.info['cmdline'] else []
+                    cmdline_str = ' '.join(cmdline)
+                    if 'streamlit' in cmdline_str and f'--server.port {streamlit_port}' in cmdline_str:
+                        logger.info(f"Terminating existing Streamlit process on port {streamlit_port}: {proc.info['pid']}")
+                        os.kill(proc.info['pid'], signal.SIGTERM)
+                except Exception as proc_err:
+                    logger.warning(f"Error checking process: {str(proc_err)}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up Streamlit processes: {str(e)}")
+        
+        # Create a process to run the Streamlit app with the session ID
+        process = multiprocessing.Process(
+            target=run_streamlit_process,
+            args=(streamlit_path, session_id, streamlit_port)
+        )
+        process.daemon = True
+        process.start()
+        
+        logger.info(f"Started Streamlit process with PID {process.pid} for session {session_id}")
+        
+        # Add to active processes for later cleanup
+        if session_id not in active_streamlit_processes:
+            active_streamlit_processes[session_id] = []
+        active_streamlit_processes[session_id].append(process.pid)
+        
+        # Return the streamlit webpage
+        template_data = {
+            'streamlit_url': f"http://localhost:{streamlit_port}?embed=true",
+            'session_id': session_id,
+        }
+        return render_template('streamlit_dashboard.html', **template_data)
 
-# Basic page configuration
-st.set_page_config(page_title="Financial KPI Dashboard", page_icon="💰", layout="wide")
+    except Exception as e:
+        error_message = f"Failed to start Streamlit dashboard: {str(e)}"
+        logger.error(error_message)
+        logger.error(traceback.format_exc())
+        flash("An error occurred starting the Streamlit dashboard.")
+        return redirect(url_for('results', session_id=session_id))
 
-# Session ID for data loading
-SESSION_ID = "SESSION_ID_PLACEHOLDER"
+def run_streamlit_process(script_path, session_id, port):
+    """Run a Streamlit process with the given script path and session ID"""
+    try:
+        # Make sure shutil is imported
+        import shutil
+        
+        # Create a merged CSV file in the session directory if it doesn't exist yet
+        session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+        
+        # Ensure both directories exist
+        os.makedirs(session_csv_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Check if all_transactions.csv exists in either directory
+        session_all_tx = os.path.join(session_csv_dir, 'all_transactions.csv')
+        output_all_tx = os.path.join(output_dir, 'all_transactions.csv')
+        
+        # If CSV exists in one place but not the other, copy it to ensure consistency
+        if os.path.exists(session_all_tx) and not os.path.exists(output_all_tx):
+            logger.info(f"Copying transactions from {session_all_tx} to {output_all_tx}")
+            shutil.copy2(session_all_tx, output_all_tx)
+        elif os.path.exists(output_all_tx) and not os.path.exists(session_all_tx):
+            logger.info(f"Copying transactions from {output_all_tx} to {session_all_tx}")
+            shutil.copy2(output_all_tx, session_all_tx)
+        
+        # If all_transactions.csv doesn't exist in either directory, create a sample one
+        if not os.path.exists(session_all_tx) and not os.path.exists(output_all_tx):
+            logger.info(f"No transaction data found for session {session_id}, creating sample data")
+            
+            # Copy sample transactions if they exist
+            sample_path = os.path.join(os.path.dirname(script_path), 'sample_transactions.csv')
+            if os.path.exists(sample_path):
+                shutil.copy(sample_path, output_all_tx)
+                shutil.copy(sample_path, session_all_tx)
+                logger.info(f"Copied sample transactions to both output and CSV directories")
+        
+        # Set environment variables to help Streamlit locate data
+        os.environ['STREAMLIT_SESSION_ID'] = session_id
+        os.environ['CSV_FOLDER'] = app.config['CSV_FOLDER']
+        os.environ['OUTPUT_FOLDER'] = app.config['OUTPUT_FOLDER']
+        
+        # Add timestamp to force cache invalidation - update with each process start
+        cache_timestamp = str(time.time())
+        os.environ['STREAMLIT_CACHE_TIMESTAMP'] = cache_timestamp
+        logger.info(f"Set cache timestamp: {cache_timestamp}")
+        
+        # Clean up Streamlit cache directory before starting new process
+        try:
+            streamlit_cache_dir = os.path.expanduser("~/.streamlit/cache")
+            if os.path.exists(streamlit_cache_dir):
+                logger.info(f"Removing Streamlit cache directory: {streamlit_cache_dir}")
+                shutil.rmtree(streamlit_cache_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Error cleaning Streamlit cache: {str(e)}")
+        
+        # Run the Streamlit command with enhanced arguments
+        cmd = [
+            "streamlit", "run", script_path,
+            "--server.port", str(port),
+            "--server.headless", "true",
+            "--browser.serverAddress", "localhost",
+            "--browser.gatherUsageStats", "false",
+            "--server.enableCORS", "true",
+            "--server.enableXsrfProtection", "false",
+            "--server.maxUploadSize", "100",
+            "--client.showErrorDetails", "true",
+            "--client.toolbarMode", "minimal",
+            "--", "--session_id", session_id, "--cache_timestamp", cache_timestamp
+        ]
+        
+        logger.info(f"Running Streamlit command: {' '.join(cmd)}")
+        subprocess.run(cmd)
+    except Exception as e:
+        logger.error(f"Error in Streamlit process: {str(e)}")
+        logger.error(traceback.format_exc())
 
-# Functions to load and process data
-def load_transaction_data(session_id):
-    # Load transaction data from CSV file
-    # Check multiple possible locations for transaction data
-    possible_paths = [
-        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/CSV Files", session_id, 'all_transactions.csv'),
-        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/GUI/web/output", session_id, 'all_transactions.csv'),
-        # Fallback to demo data if needed
-        os.path.join("/Users/paulocampos/Desktop/Work/Coding/Bank_Extraction_Code_V2/GUI/web/static/demo_data", 'all_transactions.csv')
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            st.sidebar.success(f"Loaded data from: {os.path.basename(os.path.dirname(path))}")
-            return pd.read_csv(path)
-    
-    # If no file found, create dummy data (shouldn't happen with demo data available)
-    st.sidebar.error("No transaction data found. Using demo data.")
-    return pd.DataFrame({
-        'date': pd.date_range(start='2023-01-01', periods=10, freq='M'),
-        'description': ['Salary', 'Rent', 'Groceries', 'Utilities', 'Bonus', 'Restaurant', 'Gas', 'Insurance', 'Shopping', 'Entertainment'],
-        'amount': [5000, -1500, -400, -200, 1000, -150, -80, -120, -350, -200],
-        'type': ['credit', 'debit', 'debit', 'debit', 'credit', 'debit', 'debit', 'debit', 'debit', 'debit']
-    })
+@app.route('/help')
+def help_page():
+    """Show help and documentation page"""
+    return render_template('help.html', 
+                           app_name=APP_NAME,
+                           app_version=APP_VERSION,
+                           app_author=APP_AUTHOR)
 
-def format_currency(amount):
-    # Format amount as currency with thousands separator and 2 decimal places
-    return f"${amount:,.2f}"
-
-def prepare_data(df):
-    # Clean and prepare the data for analysis
-    # Convert date to datetime
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # Ensure amount is numeric
-    df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
-    
-    # Add or fix type column
-    if 'type' not in df.columns:
-        df['type'] = df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
-    
-    # Add month column for grouping
-    df['month'] = df['date'].dt.strftime('%Y-%m')
-    df['month_name'] = df['date'].dt.strftime('%b %Y')
-    
-    # Add expense category based on description (simplified)
-    def categorize(desc):
-        desc = desc.lower()
-        if any(word in desc for word in ['salary', 'deposit', 'income', 'bonus']):
-            return 'Income'
-        elif any(word in desc for word in ['grocery', 'food', 'market']):
-            return 'Groceries'
-        elif any(word in desc for word in ['restaurant', 'dining', 'cafe', 'coffee']):
-            return 'Dining'
-        elif any(word in desc for word in ['rent', 'mortgage']):
-            return 'Housing'
-        elif any(word in desc for word in ['gas', 'fuel', 'transit', 'uber', 'lyft']):
-            return 'Transportation'
-        elif any(word in desc for word in ['utility', 'electric', 'water', 'internet', 'phone']):
-            return 'Utilities'
-        elif any(word in desc for word in ['amazon', 'walmart', 'target', 'shop']):
-            return 'Shopping'
-        elif any(word in desc for word in ['doctor', 'medical', 'pharmacy']):
-            return 'Healthcare'
+@app.route('/export_chart/<session_id>/<chart_type>', methods=['GET'])
+@require_session
+def export_chart(session_id, chart_type):
+    """Generate and download a chart as PNG"""
+    try:
+        # Load transaction data
+        df = load_transactions_data(session_id)
+        
+        if df.empty:
+            flash("No transaction data available for charts")
+            return redirect(url_for('results', session_id=session_id))
+            
+        # Ensure date column is datetime
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            
+        # Create a BytesIO object to store the image
+        img_bytes = io.BytesIO()
+        
+        # Set figure parameters based on chart type
+        plt.figure(figsize=(8, 5), dpi=100)
+        
+        if chart_type == 'monthly_income':
+            # Filter for income transactions (positive amounts)
+            income_df = df[df['amount'] > 0].copy()
+            
+            # Add month column for grouping
+            income_df['month'] = income_df['date'].dt.strftime('%Y-%m')
+            
+            # Group by month
+            monthly_income = income_df.groupby('month')['amount'].sum().reset_index()
+            
+            # Sort by month
+            monthly_income = monthly_income.sort_values('month')
+            
+            # Plot
+            ax = plt.subplot(111)
+            bars = ax.bar(monthly_income['month'], monthly_income['amount'], color='green')
+            
+            # Add data labels
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                        f'${height:,.2f}',
+                        ha='center', va='bottom', rotation=45)
+            
+            plt.title('Monthly Income')
+            plt.xlabel('Month')
+            plt.ylabel('Income ($)')
+            plt.xticks(rotation=45)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            
+        elif chart_type == 'monthly_expenses':
+            # Filter for expense transactions (negative amounts)
+            expense_df = df[df['amount'] < 0].copy()
+            
+            # Convert amounts to positive for easier visualization
+            expense_df['amount'] = expense_df['amount'].abs()
+            
+            # Add month column for grouping
+            expense_df['month'] = expense_df['date'].dt.strftime('%Y-%m')
+            
+            # Group by month
+            monthly_expenses = expense_df.groupby('month')['amount'].sum().reset_index()
+            
+            # Sort by month
+            monthly_expenses = monthly_expenses.sort_values('month')
+            
+            # Plot
+            ax = plt.subplot(111)
+            bars = ax.bar(monthly_expenses['month'], monthly_expenses['amount'], color='red')
+            
+            # Add data labels
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                        f'${height:,.2f}',
+                        ha='center', va='bottom', rotation=45)
+            
+            plt.title('Monthly Expenses')
+            plt.xlabel('Month')
+            plt.ylabel('Expenses ($)')
+            plt.xticks(rotation=45)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            
+        elif chart_type == 'income_vs_expenses':
+            # Add month column
+            df['month'] = df['date'].dt.strftime('%Y-%m')
+            
+            # Calculate monthly income and expenses
+            monthly_income = df[df['amount'] > 0].groupby('month')['amount'].sum()
+            monthly_expenses = df[df['amount'] < 0].groupby('month')['amount'].sum().abs()
+            
+            # Combine into a dataframe
+            monthly_data = pd.DataFrame({
+                'Income': monthly_income,
+                'Expenses': monthly_expenses
+            }).fillna(0)
+            
+            # Sort by month
+            monthly_data = monthly_data.sort_index()
+            
+            # Plot
+            ax = plt.subplot(111)
+            
+            # Plot bars
+            x = np.arange(len(monthly_data.index))
+            width = 0.35
+            
+            income_bars = ax.bar(x - width/2, monthly_data['Income'], width, label='Income', color='green')
+            expense_bars = ax.bar(x + width/2, monthly_data['Expenses'], width, label='Expenses', color='red')
+            
+            # Add data labels
+            for bars in [income_bars, expense_bars]:
+                for bar in bars:
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width()/2., height,
+                            f'${height:,.0f}',
+                            ha='center', va='bottom', size=8)
+            
+            # Set chart properties
+            ax.set_title('Monthly Income vs Expenses')
+            ax.set_xlabel('Month')
+            ax.set_ylabel('Amount ($)')
+            ax.set_xticks(x)
+            ax.set_xticklabels(monthly_data.index, rotation=45)
+            ax.legend()
+            ax.grid(True, linestyle='--', alpha=0.7)
+            
+            plt.tight_layout()
+            
+        elif chart_type == 'expense_categories':
+            # Check if description column exists
+            if 'description' not in df.columns:
+                plt.text(0.5, 0.5, 'No description data available for category analysis', 
+                       ha='center', va='center', transform=plt.gca().transAxes)
+            else:
+                # Filter for expenses
+                expense_df = df[df['amount'] < 0].copy()
+                expense_df['amount'] = expense_df['amount'].abs()
+                
+                # Generate basic categories based on description
+                expense_df['category'] = expense_df['description'].apply(categorize_transaction)
+                
+                # Group by category
+                category_expenses = expense_df.groupby('category')['amount'].sum().sort_values(ascending=False)
+                
+                # Use top categories and group the rest as "Other"
+                top_categories = category_expenses.head(5)
+                if len(category_expenses) > 5:
+                    other_sum = category_expenses[5:].sum()
+                    top_categories['Other'] = other_sum
+                
+                # Plot pie chart
+                plt.figure(figsize=(8, 8))  # Square figure for pie chart
+                ax = plt.subplot(111)
+                
+                # Create pie chart with percentage and value labels
+                total = top_categories.sum()
+                
+                def autopct_format(pct):
+                    value = (pct / 100) * total
+                    return f'${value:,.2f}\n({pct:.1f}%)'
+                
+                wedges, texts, autotexts = ax.pie(
+                    top_categories, 
+                    labels=top_categories.index,
+                    autopct=autopct_format,
+                    startangle=90,
+                    shadow=False
+                )
+                
+                # Styling
+                for autotext in autotexts:
+                    autotext.set_size(9)
+                    autotext.set_weight('bold')
+                
+                plt.title('Expense Categories')
+                plt.axis('equal')  # Equal aspect ratio ensures pie is circular
+                
+        elif chart_type == 'savings_trend':
+            # Add month column
+            df['month'] = df['date'].dt.strftime('%Y-%m')
+            
+            # Calculate net savings by month
+            monthly_net = df.groupby('month')['amount'].sum().reset_index()
+            
+            # Sort by month
+            monthly_net = monthly_net.sort_values('month')
+            
+            # Calculate cumulative savings
+            monthly_net['cumulative'] = monthly_net['amount'].cumsum()
+            
+            # Plot
+            ax = plt.subplot(111)
+            ax.plot(monthly_net['month'], monthly_net['cumulative'], marker='o', linewidth=2, color='blue')
+            
+            # Add data points
+            for i, v in enumerate(monthly_net['cumulative']):
+                ax.text(i, v, f'${v:,.2f}', ha='left', va='bottom')
+            
+            # Add zero line
+            ax.axhline(y=0, color='red', linestyle='-', alpha=0.3)
+            
+            # Fill between curve and zero line
+            ax.fill_between(
+                monthly_net['month'], 
+                monthly_net['cumulative'], 
+                0, 
+                where=(monthly_net['cumulative'] >= 0), 
+                color='green', 
+                alpha=0.3,
+                label='Savings'
+            )
+            ax.fill_between(
+                monthly_net['month'], 
+                monthly_net['cumulative'], 
+                0, 
+                where=(monthly_net['cumulative'] < 0), 
+                color='red', 
+                alpha=0.3,
+                label='Deficit'
+            )
+            
+            plt.title('Cumulative Savings Trend')
+            plt.xlabel('Month')
+            plt.ylabel('Cumulative Amount ($)')
+            plt.xticks(rotation=45)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
+        
         else:
-            return 'Other'
-    
-    df['category'] = df['description'].astype(str).apply(categorize)
-    
-    return df
-
-# Load and process data
-df = load_transaction_data(SESSION_ID)
-df = prepare_data(df)
-
-# Calculate KPIs
-income_df = df[df['amount'] > 0]
-expense_df = df[df['amount'] < 0]
-
-total_income = income_df['amount'].sum() if not income_df.empty else 0
-total_expenses = abs(expense_df['amount'].sum()) if not expense_df.empty else 0
-net_profit = total_income - total_expenses
-income_expense_ratio = total_income / total_expenses if total_expenses > 0 else 0
-
-# Group by month for trend analysis
-monthly_data = df.groupby('month').agg(
-    total_amount=('amount', 'sum'),
-    income=('amount', lambda x: sum(i for i in x if i > 0)),
-    expenses=('amount', lambda x: sum(i for i in x if i < 0)),
-    transactions=('amount', 'count')
-).reset_index()
-monthly_data['expenses'] = monthly_data['expenses'].abs()
-
-# Group by category for donut chart
-category_data = df[df['amount'] < 0].groupby('category').agg(
-    amount=('amount', lambda x: abs(sum(x))),
-    count=('amount', 'count')
-).reset_index()
-category_data = category_data.sort_values('amount', ascending=False)
-
-# Find highest income and expense months
-if not monthly_data.empty:
-    highest_income_month = monthly_data.loc[monthly_data['income'].idxmax()]
-    highest_expense_month = monthly_data.loc[monthly_data['expenses'].idxmax()]
-else:
-    highest_income_month = pd.Series({'month': 'N/A', 'income': 0})
-    highest_expense_month = pd.Series({'month': 'N/A', 'expenses': 0})
-
-# Average monthly calculations
-avg_monthly_income = total_income / len(monthly_data) if len(monthly_data) > 0 else 0
-avg_monthly_expenses = total_expenses / len(monthly_data) if len(monthly_data) > 0 else 0
-
-# DASHBOARD LAYOUT
-st.title('Financial KPI Dashboard')
-
-# Top KPI Cards
-st.markdown("### Key Performance Indicators")
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Income", f"${total_income:,.2f}")
-col2.metric("Total Expenses", f"${total_expenses:,.2f}")
-col3.metric("Net Profit", f"${net_profit:,.2f}")
-col4.metric("Income/Expense Ratio", f"{income_expense_ratio:.2f}")
-
-# Second row of KPIs
-st.markdown("### Financial Insights")
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Avg Monthly Income", f"${avg_monthly_income:,.2f}")
-col2.metric("Avg Monthly Expenses", f"${avg_monthly_expenses:,.2f}")
-col3.metric(f"Best Income Month", f"${highest_income_month['income']:,.2f} ({highest_income_month['month']})")
-col4.metric(f"Highest Expense Month", f"${highest_expense_month['expenses']:,.2f} ({highest_expense_month['month']})")
-
-# Income vs Expenses Trends
-st.markdown("### Monthly Income vs Expenses")
-if not monthly_data.empty:
-    # Sort by month to ensure chronological order
-    monthly_data = monthly_data.sort_values('month')
-    monthly_data['month_name'] = monthly_data['month'].apply(lambda x: pd.to_datetime(x + '-01').strftime('%b %Y'))
-    
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=monthly_data['month_name'],
-        y=monthly_data['income'],
-        name='Income',
-        marker_color='green',
-        text=[f"${x:,.2f}" for x in monthly_data['income']],
-        textposition='auto'
-    ))
-    fig.add_trace(go.Bar(
-        x=monthly_data['month_name'],
-        y=monthly_data['expenses'],
-        name='Expenses',
-        marker_color='red',
-        text=[f"${x:,.2f}" for x in monthly_data['expenses']],
-        textposition='auto'
-    ))
-    fig.add_trace(go.Scatter(
-        x=monthly_data['month_name'],
-        y=monthly_data['total_amount'],
-        name='Net',
-        mode='lines+markers',
-        line=dict(color='blue', width=3),
-        marker=dict(size=8),
-        text=[f"${x:,.2f}" for x in monthly_data['total_amount']],
-        hoverinfo='text+name'
-    ))
-    
-    fig.update_layout(
-        barmode='group',
-        title='Monthly Income vs Expenses',
-        xaxis_title='Month',
-        yaxis_title='Amount ($)',
-        legend_title='Type',
-        hovermode='x unified',
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("Not enough monthly data to display trends.")
-
-# Expense Breakdown
-st.markdown("### Expense Breakdown by Category")
-col1, col2 = st.columns([3, 2])
-
-with col1:
-    if not category_data.empty:
-        # Create pie chart
-        fig = px.pie(
-            category_data, 
-            values='amount', 
-            names='category',
-            title='Expense Distribution by Category',
-            hole=0.4,
-            color_discrete_sequence=px.colors.sequential.Plasma_r
-        )
+            # Default chart if type not recognized
+            plt.text(0.5, 0.5, f'Chart type "{chart_type}" not recognized', 
+                   ha='center', va='center', transform=plt.gca().transAxes)
         
-        # Update trace to add percentage and amount
-        fig.update_traces(
-            textposition='inside',
-            textinfo='percent+label',
-            hovertemplate='<b>%{label}</b><br>Amount: $%{value:,.2f}<br>Percentage: %{percent}'
-        )
+        # Save to BytesIO object
+        plt.savefig(img_bytes, format='png', dpi=100)
+        img_bytes.seek(0)
+        plt.close()
         
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No expense categories to display.")
-
-with col2:
-    if not category_data.empty:
-        # Format the table display
-        display_data = category_data.copy()
-        display_data['amount'] = display_data['amount'].apply(lambda x: f"${x:,.2f}")
-        display_data.columns = ['Category', 'Amount', 'Transactions']
+        # Create appropriate filename
+        filename = f"{chart_type}_{datetime.now().strftime('%Y%m%d')}.png"
         
-        st.markdown("### Top Expense Categories")
-        st.dataframe(
-            display_data,
-            hide_index=True,
-            column_config={
-                "Category": st.column_config.TextColumn("Category"),
-                "Amount": st.column_config.TextColumn("Amount"),
-                "Transactions": st.column_config.NumberColumn("Transactions")
-            },
-            height=400
-        )
-    else:
-        st.info("No expense categories to display.")
-
-# Transaction volume by month
-st.markdown("### Transaction Volume by Month")
-if not monthly_data.empty:
-    fig = px.bar(
-        monthly_data, 
-        x='month_name', 
-        y='transactions',
-        text_auto=True,
-        title='Number of Transactions per Month',
-        color='transactions', 
-        color_continuous_scale='Viridis'
-    )
-    
-    fig.update_layout(
-        xaxis_title='Month',
-        yaxis_title='Transaction Count',
-        height=400
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("Not enough data to display transaction volume.")
-
-# Add a back button
-if st.sidebar.button("Back to Results"):
-    st.sidebar.markdown('<meta http-equiv="refresh" content="0;URL=/results/%s"/>' % SESSION_ID, unsafe_allow_html=True)
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"Total Transactions: **{len(df)}**")
-st.sidebar.markdown(f"Data Range: **{df['date'].min().strftime('%b %d, %Y')}** to **{df['date'].max().strftime('%b %d, %Y')}**")
-'''
-        
-        # Replace SESSION_ID with the actual session_id
-        streamlit_script = streamlit_script.replace('SESSION_ID_PLACEHOLDER', session_id)
-        
-        # Save the Streamlit script to a file
-        temp_script_path = os.path.join(app.config['APP_ROOT'], f'temp_simple_streamlit_{session_id}.py')
-        with open(temp_script_path, 'w') as f:
-            f.write(streamlit_script)
-        
-        logger.info(f"Created KPI dashboard Streamlit script at {temp_script_path}")
-        
-        # Instead of embedding in an iframe, provide a link to the user with instructions
-        flash("KPI dashboard is starting. Click the link below to access it.", "info")
-        
-        # Start Streamlit in a separate process without waiting for it
-        import subprocess
-        subprocess.Popen(
-            [
-                'streamlit', 'run', 
-                temp_script_path, 
-                '--server.port', str(streamlit_port),
-                '--server.headless', 'true',
-                '--browser.serverAddress', 'localhost',
-                '--server.enableCORS', 'true',
-                '--server.enableXsrfProtection', 'false'
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        
-        # Return a page with a direct link to the Streamlit dashboard
-        return render_template(
-            'streamlit_redirect.html',
-            session_id=session_id,
-            streamlit_url=f"http://localhost:{streamlit_port}"
+        # Return the PNG file as an attachment
+        return send_file(
+            img_bytes,
+            mimetype='image/png',
+            as_attachment=True,
+            download_name=filename
         )
         
     except Exception as e:
-        logger.error(f"Error launching KPI dashboard: {str(e)}")
+        logger.error(f"Error generating chart for export: {str(e)}")
         logger.error(traceback.format_exc())
-        flash(f"Error launching dashboard: {str(e)}", "danger")
+        flash(f"Error generating chart: {str(e)}")
         return redirect(url_for('results', session_id=session_id))
+
+
+def categorize_transaction(description):
+    """Basic categorization of transactions based on description"""
+    description = description.lower()
+    
+    # Income categories
+    if any(word in description for word in ['salary', 'payroll', 'direct deposit']):
+        return 'Income:Salary'
+    elif any(word in description for word in ['interest', 'dividend']):
+        return 'Income:Investments'
+    
+    # Housing categories
+    if any(word in description for word in ['rent', 'mortgage', 'hoa', 'housing']):
+        return 'Housing'
+    
+    # Utilities
+    if any(word in description for word in ['electric', 'water', 'gas', 'utility', 'utilities', 'internet', 'cable', 'phone']):
+        return 'Utilities'
+    
+    # Food categories
+    if any(word in description for word in ['restaurant', 'dining', 'food', 'cafe', 'coffee', 'doordash', 'grubhub', 'uber eats']):
+        return 'Food & Dining'
+    elif any(word in description for word in ['grocery', 'supermarket', 'market', 'walmart', 'target', 'costco']):
+        return 'Groceries'
+    
+    # Transportation categories
+    if any(word in description for word in ['uber', 'lyft', 'taxi', 'transit', 'train', 'subway', 'metro', 'bus']):
+        return 'Transportation'
+    elif any(word in description for word in ['gas', 'fuel', 'exxon', 'shell', 'chevron']):
+        return 'Auto:Fuel'
+    elif any(word in description for word in ['auto', 'car', 'vehicle', 'insurance']):
+        return 'Auto:Other'
+        
+    # Shopping categories
+    if any(word in description for word in ['amazon', 'ebay', 'etsy', 'shop', 'store']):
+        return 'Shopping'
+    
+    # Entertainment categories
+    if any(word in description for word in ['movie', 'theatre', 'theater', 'netflix', 'hulu', 'spotify', 'entertainment']):
+        return 'Entertainment'
+    
+    # Health categories
+    if any(word in description for word in ['doctor', 'health', 'medical', 'pharmacy', 'fitness', 'gym']):
+        return 'Health & Fitness'
+    
+    # Travel categories
+    if any(word in description for word in ['hotel', 'airbnb', 'airline', 'air', 'flight', 'travel']):
+        return 'Travel'
+    
+    # Subscription
+    if any(word in description for word in ['subscription', 'membership']):
+        return 'Subscriptions'
+        
+    # Default for anything not matching above categories
+    return 'Uncategorized'
+
+@app.route('/kpi_dashboard/<session_id>')
+@require_session
+def kpi_dashboard(session_id):
+    """Show KPI dashboard for processed data"""
+    try:
+        # Load transaction data
+        df = load_transactions_data(session_id)
+        
+        if df.empty:
+            flash("No transaction data available for KPI analysis")
+            return redirect(url_for('results', session_id=session_id))
+        
+        # Calculate KPIs
+        kpi_data = calculate_kpis(df)
+        
+        # Generate chart images
+        charts = generate_kpi_charts(df)
+        
+        # Generate forecast if we have enough data
+        forecast = None
+        if kpi_data.get('num_months', 0) >= 3:
+            forecast = generate_forecast(df)
+        
+        return render_template('kpi_dashboard.html',
+                              app_name=APP_NAME,
+                              app_version=APP_VERSION,
+                              app_author=APP_AUTHOR,
+                              session_id=session_id,
+                              kpi_data=kpi_data,
+                              charts=charts,
+                              forecast=forecast)
+                              
+    except Exception as e:
+        logger.error(f"Error generating KPI dashboard: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash(f"Error generating KPI dashboard: {str(e)}")
+        return redirect(url_for('results', session_id=session_id))
+
+def calculate_kpis(df):
+    """Calculate key performance indicators from transaction data"""
+    kpi_data = {}
+    
+    try:
+        # Make sure data is properly formatted
+        if 'date' not in df.columns or 'amount' not in df.columns:
+            return kpi_data
+            
+        # Ensure date is in datetime format
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Add month information for aggregations
+        df['month'] = df['date'].dt.strftime('%Y-%m')
+        
+        # Calculate total income and expenses
+        total_income = df[df['amount'] > 0]['amount'].sum()
+        total_expenses = abs(df[df['amount'] < 0]['amount'].sum())
+        
+        # Calculate income to expense ratio
+        if total_expenses > 0:
+            income_expense_ratio = total_income / total_expenses
+        else:
+            income_expense_ratio = float('inf')  # Avoid division by zero
+            
+        # Calculate average monthly income and expenses
+        # Group by month and calculate sums
+        monthly_data = df.groupby('month').agg({
+            'amount': lambda x: (x[x > 0].sum(), abs(x[x < 0].sum()))
+        })
+        
+        # Extract monthly income and expenses
+        monthly_income = [x[0] for x in monthly_data['amount']]
+        monthly_expenses = [x[1] for x in monthly_data['amount']]
+        
+        # Calculate averages
+        num_months = len(monthly_income)
+        avg_monthly_income = sum(monthly_income) / num_months if num_months > 0 else 0
+        avg_monthly_expenses = sum(monthly_expenses) / num_months if num_months > 0 else 0
+        
+        # Find month with highest income
+        if num_months > 0:
+            monthly_income_dict = {month: x[0] for month, x in zip(monthly_data.index, monthly_data['amount'])}
+            highest_income_month = max(monthly_income_dict.items(), key=lambda x: x[1])
+        else:
+            highest_income_month = ('N/A', 0)
+            
+        # Store KPI data
+        kpi_data = {
+            'total_income': total_income,
+            'total_expenses': total_expenses,
+            'income_expense_ratio': income_expense_ratio,
+            'num_months': num_months,
+            'avg_monthly_income': avg_monthly_income,
+            'avg_monthly_expenses': avg_monthly_expenses,
+            'highest_income_month': highest_income_month,
+            'net_profit': total_income - total_expenses
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating KPIs: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+    return kpi_data
+
+
+def generate_forecast(df, months_ahead=3):
+    """Generate financial forecast based on historical data"""
+    forecast = []
+    
+    try:
+        # Ensure date is in datetime format
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Add month information for aggregations
+        df['month'] = df['date'].dt.strftime('%Y-%m')
+        
+        # Group by month and calculate income and expenses
+        monthly_data = pd.DataFrame({
+            'income': df[df['amount'] > 0].groupby('month')['amount'].sum(),
+            'expenses': abs(df[df['amount'] < 0].groupby('month')['amount'].sum())
+        }).fillna(0)
+        
+        # If we don't have enough data, return empty forecast
+        if len(monthly_data) < 3:
+            return forecast
+            
+        # Sort by month for time series analysis
+        monthly_data = monthly_data.sort_index()
+        
+        # Calculate basic statistics
+        avg_income = monthly_data['income'].mean()
+        avg_expenses = monthly_data['expenses'].mean()
+        income_growth = calculate_growth_rate(monthly_data['income'])
+        expense_growth = calculate_growth_rate(monthly_data['expenses'])
+        
+        # Get the last month in data
+        last_month = pd.to_datetime(monthly_data.index[-1] + '-01')
+        
+        # Generate forecast
+        for i in range(1, months_ahead + 1):
+            next_month = last_month + pd.DateOffset(months=i)
+            month_name = next_month.strftime('%Y-%m')
+            
+            # Project income and expenses with growth factors
+            projected_income = avg_income * (1 + income_growth * i)
+            projected_expenses = avg_expenses * (1 + expense_growth * i)
+            projected_savings = projected_income - projected_expenses
+            
+            forecast.append({
+                'month': month_name,
+                'income': projected_income,
+                'expenses': projected_expenses,
+                'savings': projected_savings
+            })
+            
+    except Exception as e:
+        logger.error(f"Error generating forecast: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+    return forecast
+
+
+def calculate_growth_rate(series):
+    """Calculate average month-over-month growth rate"""
+    if len(series) < 2 or series.iloc[0] == 0:
+        return 0
+        
+    try:
+        # Calculate percentage changes
+        pct_changes = series.pct_change().dropna()
+        
+        # Remove outliers (changes > 100%)
+        filtered_changes = pct_changes[pct_changes.abs() <= 1]
+        
+        # If all changes were outliers, use a small default growth
+        if len(filtered_changes) == 0:
+            return 0.01  # Default to 1% growth
+            
+        # Return average growth rate
+        return filtered_changes.mean()
+        
+    except Exception as e:
+        logger.error(f"Error calculating growth rate: {str(e)}")
+        return 0
+
+@app.route('/clear_streamlit_cache/<session_id>')
+@require_session
+def clear_streamlit_cache(session_id):
+    """Clear Streamlit cache and restart the dashboard process"""
+    try:
+        logger.info(f"Clearing Streamlit cache for session {session_id}")
+        
+        # Kill any existing Streamlit processes for this session
+        if session_id in active_streamlit_processes:
+            try:
+                import signal
+                import psutil
+                for pid in active_streamlit_processes[session_id]:
+                    try:
+                        logger.info(f"Terminating Streamlit process {pid} for session {session_id}")
+                        os.kill(pid, signal.SIGTERM)
+                    except Exception as e:
+                        logger.warning(f"Error terminating process {pid}: {str(e)}")
+                
+                # Clear the list of active processes for this session
+                active_streamlit_processes[session_id] = []
+            except Exception as e:
+                logger.warning(f"Error cleaning up processes: {str(e)}")
+        
+        # Clear the Streamlit cache directory
+        try:
+            import shutil
+            streamlit_cache_dir = os.path.expanduser("~/.streamlit/cache")
+            if os.path.exists(streamlit_cache_dir):
+                logger.info(f"Removing Streamlit cache directory: {streamlit_cache_dir}")
+                shutil.rmtree(streamlit_cache_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Error cleaning Streamlit cache: {str(e)}")
+        
+        # Flash success message and redirect to Streamlit dashboard
+        flash("Successfully cleared Streamlit cache. Dashboard will reload with fresh data.")
+        return redirect(url_for('simple_streamlit', session_id=session_id))
+    
+    except Exception as e:
+        logger.error(f"Error clearing Streamlit cache: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash("Error clearing Streamlit cache. Please try again.")
+        return redirect(url_for('results', session_id=session_id))
+
+@app.route('/reset_and_upload')
+def reset_and_upload():
+    """Clear existing data and redirect to upload page for new files"""
+    session_id = get_session_id()
+    
+    try:
+        cleanup_session_files(session_id)
+        flash("All previous files cleared. You can now upload new files.")
+    except Exception as e:
+        flash(f"Error clearing files: {str(e)}")
+        logger.error(f"Error clearing files for session {session_id}: {str(e)}")
+    
+    return redirect(url_for('index'))
+
+# Function to clean up files for a specific session
+def cleanup_session_files(session_id):
+    """Clean up all files associated with a session"""
+    try:
+        # Clear uploads directory (including PDF files)
+        upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        if os.path.exists(upload_dir):
+            for file in os.listdir(upload_dir):
+                file_path = os.path.join(upload_dir, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Removed file: {file_path}")
+            logger.info(f"Cleared upload directory for session {session_id}")
+            
+            # Try to remove the directory itself after files are deleted
+            try:
+                os.rmdir(upload_dir)
+                logger.info(f"Removed upload directory for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Could not remove upload directory: {str(e)}")
+        
+        # Clear CSV directory
+        csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+        if os.path.exists(csv_dir):
+            for file in os.listdir(csv_dir):
+                file_path = os.path.join(csv_dir, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Removed file: {file_path}")
+            logger.info(f"Cleared CSV directory for session {session_id}")
+            
+            # Try to remove the directory itself after files are deleted
+            try:
+                os.rmdir(csv_dir)
+                logger.info(f"Removed CSV directory for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Could not remove CSV directory: {str(e)}")
+        
+        # Clear output directory
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+        if os.path.exists(output_dir):
+            for file in os.listdir(output_dir):
+                file_path = os.path.join(output_dir, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Removed file: {file_path}")
+            logger.info(f"Cleared output directory for session {session_id}")
+            
+            # Try to remove the directory itself after files are deleted
+            try:
+                os.rmdir(output_dir)
+                logger.info(f"Removed output directory for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Could not remove output directory: {str(e)}")
+        
+        # Reset processing status
+        if session_id in processing_status:
+            del processing_status[session_id]
+        if session_id in processing_logs:
+            del processing_logs[session_id]
+            
+        # If this session had Streamlit processes, kill them
+        if session_id in active_streamlit_processes:
+            try:
+                import signal
+                for pid in active_streamlit_processes[session_id]:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                        logger.info(f"Terminated Streamlit process {pid}")
+                    except Exception as e:
+                        logger.warning(f"Could not terminate process {pid}: {str(e)}")
+                del active_streamlit_processes[session_id]
+            except Exception as e:
+                logger.warning(f"Error cleaning up Streamlit processes: {str(e)}")
+                
+        # Remove from active sessions
+        if session_id in active_sessions:
+            active_sessions.remove(session_id)
+            logger.info(f"Removed session {session_id} from active sessions")
+    except Exception as e:
+        logger.error(f"Error cleaning up files for session {session_id}: {str(e)}")
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=4446) 
