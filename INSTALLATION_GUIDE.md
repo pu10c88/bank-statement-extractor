@@ -1,10 +1,10 @@
-# Bank Statement Extractor v3.1.0 - Installation Guide
+# Bank Statement Extractor v3.1.1 - Web Application Installation Guide
 
 ## Overview
 
-Bank Statement Extractor is a professional desktop application that allows you to extract transaction data from bank statements (PDF, CSV, and Excel files) and analyze your financial information. With the new v3.1.0 update, it features a modernized dark UI optimized for productivity and eye comfort. This guide will help you install and set up the application on your computer.
+Bank Statement Extractor is a professional web application that allows you to extract transaction data from bank statements (PDF, CSV, and Excel files) and analyze your financial information. With the v3.1.1 update, it features a modernized dark UI optimized for productivity and eye comfort. This guide will help you install and set up the web application on your server.
 
-## What's New in v3.1.0
+## What's New in v3.1.1
 
 - **Modern Dark UI**: Completely redesigned interface with professional dark mode and Sigma brand colors
 - **Enhanced User Experience**: Improved workflow with intuitive navigation and responsive design
@@ -14,32 +14,12 @@ Bank Statement Extractor is a professional desktop application that allows you t
 
 ## System Requirements
 
-- Windows 10/11, macOS 10.14+, or Linux
-- At least 4GB RAM
-- 500MB free disk space
+- Python 3.9+
 - Modern web browser (Chrome, Firefox, Safari, Edge recommended)
+- 4GB RAM (recommended)
+- 500MB free disk space
 
-## Installation Options
-
-There are two ways to install Bank Statement Extractor:
-
-### Option 1: Pre-built Installers (Recommended)
-
-1. **Download the installer** appropriate for your operating system:
-   - For Windows: `Bank_Statement_Extractor_Windows_Setup.exe`
-   - For macOS: `Bank_Statement_Extractor_macOS.dmg`
-   - For Linux: `Bank_Statement_Extractor_Linux.AppImage`
-
-2. **Run the installer**:
-   - Windows: Double-click the .exe file and follow the installation wizard
-   - macOS: Open the .dmg file, drag the application to your Applications folder
-   - Linux: Make the AppImage executable (`chmod +x Bank_Statement_Extractor_Linux.AppImage`) and run it
-
-3. **Launch the application** from your applications menu/desktop shortcut
-
-### Option 2: Python Package Installation
-
-If you're comfortable with Python, you can install the application as a Python package:
+## Installation
 
 1. **Ensure you have Python 3.9 or newer installed**
    ```
@@ -68,9 +48,9 @@ If you're comfortable with Python, you can install the application as a Python p
    http://localhost:4446
    ```
 
-## Using the New Interface
+## Using the Web Interface
 
-1. When you first launch the application, you'll see the new dark-themed interface.
+1. When you first access the application, you'll see the dark-themed interface.
 
 2. **Upload files**:
    - Drag and drop files directly into the upload area
@@ -92,11 +72,10 @@ If you're comfortable with Python, you can install the application as a Python p
 
 ### Common Issues:
 
-1. **Application won't start**:
-   - Windows: Make sure Microsoft Visual C++ Redistributable is installed
-   - macOS: Right-click the app and select "Open" to bypass Gatekeeper
-   - Linux: Make sure the AppImage has execute permissions
-   - Web version: Ensure port 4446 is available and not blocked by firewall
+1. **Web server won't start**:
+   - Ensure port 4446 is available and not blocked by firewall
+   - Check that you have the necessary permissions to run the server
+   - Verify all dependencies are installed correctly
 
 2. **UI display issues**:
    - Try using a different modern browser
@@ -109,7 +88,7 @@ If you're comfortable with Python, you can install the application as a Python p
    - Verify the PDF/CSV format matches expected layouts
 
 4. **Dependencies issues**:
-   - If using the Python package method, ensure all required packages are installed:
+   - Ensure all required packages are installed:
      ```
      pip install -r requirements.txt
      ```
@@ -122,8 +101,11 @@ If you encounter any issues, please contact us at:
 
 ## Updates
 
-- Windows/macOS: The application will automatically check for updates
-- Python package: Update with `git pull` in the project directory and reinstall requirements if needed
+- Update with `git pull` in the project directory and reinstall requirements if needed:
+  ```
+  git pull
+  pip install -r requirements.txt
+  ```
 
 ---
 

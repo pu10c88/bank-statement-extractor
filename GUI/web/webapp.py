@@ -44,6 +44,9 @@ from chase_statements_load import load_pdf as chase_load_pdf
 from chase_statements_load import merge_csv_files
 from bofa_statements_load import load_pdf as bofa_load_pdf
 
+# Import CSV processing module
+from csv_load import process_csv_file, is_csv_file, is_excel_file
+
 # Initialize Flask app with static folder configuration
 static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 if not os.path.exists(static_folder):
@@ -410,30 +413,45 @@ def upload_file():
         os.remove(os.path.join(session_dir, existing_file))
     
     # Save all uploaded files
-    filenames = []
+    pdf_filenames = []
+    csv_excel_filenames = []
+    
     for file in files:
-        if file and file.filename.endswith('.pdf'):
-            filename = file.filename
+        if file and file.filename:
+            filename = secure_filename(file.filename)
             file_path = os.path.join(session_dir, filename)
             file.save(file_path)
-            filenames.append(filename)
+            
+            if filename.lower().endswith('.pdf'):
+                pdf_filenames.append(filename)
+            elif is_csv_file(filename) or is_excel_file(filename):
+                csv_excel_filenames.append(filename)
     
-    if filenames:
-        # Start processing in a separate thread
-        processing_status[session_id] = {
-            'status': 'processing',
-            'progress': 0,
-            'total_files': len(filenames)
-        }
-        processing_logs[session_id] = []
-        
+    # Initialize processing
+    processing_status[session_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'total_files': len(pdf_filenames) + len(csv_excel_filenames)
+    }
+    processing_logs[session_id] = []
+    
+    # Process files based on their type
+    if pdf_filenames:
+        processing_logs[session_id].append(f"Found {len(pdf_filenames)} PDF files to process.")
         thread = threading.Thread(target=process_pdfs, args=(session_dir, bank_type, session_id))
         thread.daemon = True
         thread.start()
-        
-        flash(f'Uploaded {len(filenames)} files. Processing started.')
+    
+    if csv_excel_filenames:
+        processing_logs[session_id].append(f"Found {len(csv_excel_filenames)} CSV/Excel files to process.")
+        thread = threading.Thread(target=process_csv_files, args=(session_id, app.config, processing_logs[session_id]))
+        thread.daemon = True
+        thread.start()
+    
+    if pdf_filenames or csv_excel_filenames:
+        flash(f'Uploaded {len(pdf_filenames)} PDF files and {len(csv_excel_filenames)} CSV/Excel files. Processing started.')
     else:
-        flash('No valid PDF files uploaded')
+        flash('No valid files uploaded')
     
     return redirect(url_for('status', session_id=session_id))
 
@@ -499,7 +517,7 @@ def results(session_id):
     # Generate summary data
     summary = create_transaction_summary(transactions)
     
-    # Calculate totals
+    # Calculate totals - simplified approach using the sign of the amount
     total_income = sum(transaction['amount'] for transaction in transactions if transaction['amount'] > 0)
     total_expenses = sum(abs(transaction['amount']) for transaction in transactions if transaction['amount'] < 0)
     net_profit = total_income - total_expenses
@@ -611,13 +629,9 @@ def merge_files(session_id):
         if 'type' not in combined_df.columns:
             combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
         
-        # Save to CSV in both locations
-        combined_df.to_csv(all_transactions_path, index=False)
-        combined_df.to_csv(output_transactions_path, index=False)
-        
+        # Calculate transaction count
         transaction_count = len(combined_df)
         flash(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
-        
     except Exception as e:
         logger.error(f"Error merging CSV files: {str(e)}")
         logger.error(traceback.format_exc())
@@ -804,13 +818,18 @@ def format_currency(amount):
 def process_pdfs(directory, bank_type, session_id):
     """Process all PDFs in the directory"""
     try:
-        # Get list of files in the directory
+        # Get list of PDF files in the directory
         files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.pdf')]
         
+        if not files:
+            processing_logs[session_id].append("No PDF files found to process.")
+            return
+        
         # Update status
-        processing_status[session_id]['total_files'] = len(files)
-        processing_status[session_id]['processed'] = 0
-        processing_logs[session_id].append(f"Processing {len(files)} PDF files...")
+        pdf_count = len(files)
+        processing_status[session_id]['pdf_total'] = pdf_count
+        processing_status[session_id]['pdf_processed'] = 0
+        processing_logs[session_id].append(f"Processing {pdf_count} PDF files...")
         
         # Create session-specific CSV output directory
         session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
@@ -824,8 +843,17 @@ def process_pdfs(directory, bank_type, session_id):
         for i, file_path in enumerate(files):
             try:
                 # Update progress
-                processing_status[session_id]['progress'] = ((i + 1) / len(files)) * 100
-                processing_status[session_id]['processed'] = i + 1
+                pdf_progress = ((i + 1) / pdf_count) * 100
+                processing_status[session_id]['pdf_progress'] = pdf_progress
+                processing_status[session_id]['pdf_processed'] = i + 1
+                
+                # Update overall progress (estimate)
+                if 'csv_progress' in processing_status[session_id]:
+                    total_progress = (pdf_progress + processing_status[session_id].get('csv_progress', 0)) / 2
+                else:
+                    total_progress = pdf_progress
+                processing_status[session_id]['progress'] = total_progress
+                
                 processing_logs[session_id].append(f"Processing {os.path.basename(file_path)}...")
                 
                 # Convert to Path object for better path handling
@@ -861,72 +889,88 @@ def process_pdfs(directory, bank_type, session_id):
                 logger.error(error_message)
                 logger.error(traceback.format_exc())
         
-        # Automatically merge all CSV files after processing
-        try:
-            processing_logs[session_id].append("Automatically merging all CSV files...")
-            # Find all CSV files in the session directory
-            csv_files = []
-            for file in os.listdir(session_csv_dir):
-                if file.endswith('.csv') and file != 'all_transactions.csv':
-                    csv_files.append(os.path.join(session_csv_dir, file))
-            
-            if csv_files:
-                # Merge all CSV files into one
-                all_transactions = []
-                for csv_file in csv_files:
-                    try:
-                        df = pd.read_csv(csv_file)
-                        if not df.empty:
-                            all_transactions.append(df)
-                    except Exception as e:
-                        processing_logs[session_id].append(f"Error loading {os.path.basename(csv_file)}: {str(e)}")
-                
-                if all_transactions:
-                    # Concatenate all dataframes
-                    combined_df = pd.concat(all_transactions, ignore_index=True)
-                    
-                    # Ensure date column is in datetime format
-                    if 'date' in combined_df.columns:
-                        combined_df['date'] = pd.to_datetime(combined_df['date'], errors='coerce')
-                        
-                        # Sort by date
-                        combined_df = combined_df.sort_values('date')
-                        
-                        # Convert back to string format for storage
-                        combined_df['date'] = combined_df['date'].dt.strftime('%Y-%m-%d')
-                    
-                    # Add transaction type if not present
-                    if 'type' not in combined_df.columns:
-                        combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
-                    
-                    # Save to CSV in both locations
-                    merged_file = os.path.join(session_csv_dir, 'all_transactions.csv')
-                    combined_df.to_csv(merged_file, index=False)
-                    
-                    output_merged_file = os.path.join(output_dir, 'all_transactions.csv')
-                    combined_df.to_csv(output_merged_file, index=False)
-                    
-                    transaction_count = len(combined_df)
-                    processing_logs[session_id].append(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
-                else:
-                    processing_logs[session_id].append("No valid transactions found in any of the processed files")
-            else:
-                processing_logs[session_id].append("No CSV files found to merge")
-        except Exception as e:
-            error_message = f"Error merging CSV files: {str(e)}"
-            processing_logs[session_id].append(error_message)
-            logger.error(error_message)
-            logger.error(traceback.format_exc())
+        # Check if we need to wait for CSV processing to complete
+        if 'csv_processing' in processing_status[session_id] and processing_status[session_id]['csv_processing']:
+            processing_logs[session_id].append("PDF processing complete. Waiting for CSV processing to finish...")
+        else:
+            # Automatically merge all CSV files after processing
+            merge_csv_files_for_session(session_id)
         
-        # Update final status
-        processing_status[session_id]['status'] = 'completed'
-    
     except Exception as e:
         error_message = f"Error during processing: {str(e)}"
         processing_logs[session_id].append(error_message)
         logger.error(error_message)
         logger.error(traceback.format_exc())
         processing_status[session_id]['status'] = 'error'
+
+def merge_csv_files_for_session(session_id):
+    """Merge all CSV files for a session into one file."""
+    try:
+        processing_logs[session_id].append("Automatically merging all CSV files...")
+        # Find all CSV files in the session directory
+        session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+        
+        if not os.path.exists(session_csv_dir):
+            processing_logs[session_id].append("CSV directory does not exist. Nothing to merge.")
+            processing_status[session_id]['status'] = 'completed'
+            return
+            
+        csv_files = []
+        for file in os.listdir(session_csv_dir):
+            if file.endswith('.csv') and file != 'all_transactions.csv':
+                csv_files.append(os.path.join(session_csv_dir, file))
+        
+        if csv_files:
+            # Merge all CSV files into one
+            all_transactions = []
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    if not df.empty:
+                        all_transactions.append(df)
+                except Exception as e:
+                    processing_logs[session_id].append(f"Error loading {os.path.basename(csv_file)}: {str(e)}")
+            
+            if all_transactions:
+                # Concatenate all dataframes
+                combined_df = pd.concat(all_transactions, ignore_index=True)
+                
+                # Ensure date column is in datetime format
+                if 'date' in combined_df.columns:
+                    combined_df['date'] = pd.to_datetime(combined_df['date'], errors='coerce')
+                    
+                    # Sort by date
+                    combined_df = combined_df.sort_values('date')
+                    
+                    # Convert back to string format for storage
+                    combined_df['date'] = combined_df['date'].dt.strftime('%Y-%m-%d')
+                
+                # Add transaction type if not present, based on amount sign
+                if 'type' not in combined_df.columns:
+                    combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
+                
+                # Save to CSV in both locations
+                merged_file = os.path.join(session_csv_dir, 'all_transactions.csv')
+                combined_df.to_csv(merged_file, index=False)
+                
+                output_merged_file = os.path.join(output_dir, 'all_transactions.csv')
+                combined_df.to_csv(output_merged_file, index=False)
+                
+                transaction_count = len(combined_df)
+                processing_logs[session_id].append(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
+            else:
+                processing_logs[session_id].append("No valid transactions found in any of the processed files")
+        else:
+            processing_logs[session_id].append("No CSV files found to merge")
+    except Exception as e:
+        error_message = f"Error merging CSV files: {str(e)}"
+        processing_logs[session_id].append(error_message)
+        logger.error(error_message)
+        logger.error(traceback.format_exc())
+    
+    # Update final status
+    processing_status[session_id]['status'] = 'completed'
 
 def create_transaction_summary(transactions):
     """Generate summary data from transactions list for the template"""
@@ -1909,6 +1953,190 @@ def cleanup_session_files(session_id):
             logger.info(f"Removed session {session_id} from active sessions")
     except Exception as e:
         logger.error(f"Error cleaning up files for session {session_id}: {str(e)}")
+
+@app.route('/import_csv/<session_id>')
+def import_csv_to_dashboard(session_id):
+    """Directly import CSV data to the dashboard without saving external files."""
+    session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+    output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+    
+    # Create dashboard data directory if needed
+    dashboard_dir = os.path.join(output_dir, 'dashboard_data')
+    os.makedirs(dashboard_dir, exist_ok=True)
+    
+    # Check for all_transactions.csv file
+    all_transactions_file = os.path.join(session_csv_dir, 'all_transactions.csv')
+    
+    if not os.path.exists(all_transactions_file):
+        flash("No transaction data found. Please upload and process files first.")
+        return redirect(url_for('results', session_id=session_id))
+    
+    try:
+        # Load transactions without saving additional files
+        df = pd.read_csv(all_transactions_file)
+        transactions = df.to_dict('records')
+        
+        # Start Streamlit process with --no-save option to avoid creating additional files
+        return start_streamlit_dashboard(session_id, no_save=True)
+    except Exception as e:
+        flash(f"Error importing CSV data: {str(e)}")
+        logger.error(f"Error importing CSV data: {str(e)}")
+        logger.error(traceback.format_exc())
+        return redirect(url_for('results', session_id=session_id))
+
+def process_csv_files(session_id, app_config, logs):
+    """Process CSV and Excel files for the session."""
+    try:
+        # Get session directory
+        session_dir = os.path.join(app_config['UPLOAD_FOLDER'], session_id)
+        csv_output_dir = os.path.join(app_config['CSV_FOLDER'], session_id)
+        
+        # Ensure output directory exists
+        os.makedirs(csv_output_dir, exist_ok=True)
+        
+        # Find all CSV and Excel files
+        files = []
+        for filename in os.listdir(session_dir):
+            file_path = os.path.join(session_dir, filename)
+            if os.path.isfile(file_path) and (is_csv_file(filename) or is_excel_file(filename)):
+                files.append(file_path)
+        
+        total_files = len(files)
+        logs.append(f"Found {total_files} CSV/Excel files to process.")
+        
+        # Process each file
+        for i, file_path in enumerate(files):
+            try:
+                filename = os.path.basename(file_path)
+                logs.append(f"Processing {filename}...")
+                
+                # If it's an Excel file, convert to CSV
+                if is_excel_file(filename):
+                    logs.append(f"Converting Excel file to CSV: {filename}")
+                    from csv_load import convert_xlsx_to_csv
+                    csv_file_path = convert_xlsx_to_csv(file_path)
+                    if csv_file_path:
+                        file_path = csv_file_path
+                
+                # Process the CSV file
+                from csv_load import process_csv_file
+                transactions = process_csv_file(file_path)
+                
+                # Save processed data to the CSV directory
+                output_filename = os.path.splitext(filename)[0] + '.csv'
+                output_path = os.path.join(csv_output_dir, output_filename)
+                
+                # Convert transactions to DataFrame and save
+                if transactions:
+                    df = pd.DataFrame(transactions)
+                    df.to_csv(output_path, index=False)
+                    logs.append(f"Saved {len(transactions)} transactions to {output_filename}")
+                else:
+                    logs.append(f"No transactions found in {filename}")
+                
+                # Update progress
+                progress = int(((i + 1) / total_files) * 100)
+                if session_id in processing_status:
+                    processing_status[session_id]['progress'] = progress
+            
+            except Exception as e:
+                error_msg = f"Error processing {os.path.basename(file_path)}: {str(e)}"
+                logs.append(error_msg)
+                logger.error(error_msg)
+                traceback.print_exc()
+        
+        # Update processing status
+        if session_id in processing_status:
+            processing_status[session_id]['status'] = 'completed'
+            processing_status[session_id]['progress'] = 100
+        
+        logs.append("CSV/Excel processing completed.")
+        
+        # Merge all CSV files
+        if total_files > 0:
+            logs.append("Merging all CSV files...")
+            merge_csv_files_for_session(session_id)
+            logs.append("Merge completed.")
+    
+    except Exception as e:
+        error_msg = f"Error in CSV/Excel processing: {str(e)}"
+        logs.append(error_msg)
+        logger.error(error_msg)
+        traceback.print_exc()
+        
+        # Update status to error
+        if session_id in processing_status:
+            processing_status[session_id]['status'] = 'error'
+            processing_status[session_id]['message'] = str(e)
+
+def merge_csv_files_for_session(session_id):
+    """Merge all CSV files for a session into one file."""
+    try:
+        processing_logs[session_id].append("Automatically merging all CSV files...")
+        # Find all CSV files in the session directory
+        session_csv_dir = os.path.join(app.config['CSV_FOLDER'], session_id)
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], session_id)
+        
+        if not os.path.exists(session_csv_dir):
+            processing_logs[session_id].append("CSV directory does not exist. Nothing to merge.")
+            processing_status[session_id]['status'] = 'completed'
+            return
+            
+        csv_files = []
+        for file in os.listdir(session_csv_dir):
+            if file.endswith('.csv') and file != 'all_transactions.csv':
+                csv_files.append(os.path.join(session_csv_dir, file))
+        
+        if csv_files:
+            # Merge all CSV files into one
+            all_transactions = []
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    if not df.empty:
+                        all_transactions.append(df)
+                except Exception as e:
+                    processing_logs[session_id].append(f"Error loading {os.path.basename(csv_file)}: {str(e)}")
+            
+            if all_transactions:
+                # Concatenate all dataframes
+                combined_df = pd.concat(all_transactions, ignore_index=True)
+                
+                # Ensure date column is in datetime format
+                if 'date' in combined_df.columns:
+                    combined_df['date'] = pd.to_datetime(combined_df['date'], errors='coerce')
+                    
+                    # Sort by date
+                    combined_df = combined_df.sort_values('date')
+                    
+                    # Convert back to string format for storage
+                    combined_df['date'] = combined_df['date'].dt.strftime('%Y-%m-%d')
+                
+                # Add transaction type if not present, based on amount sign
+                if 'type' not in combined_df.columns:
+                    combined_df['type'] = combined_df.apply(lambda row: 'credit' if row['amount'] >= 0 else 'debit', axis=1)
+                
+                # Save to CSV in both locations
+                merged_file = os.path.join(session_csv_dir, 'all_transactions.csv')
+                combined_df.to_csv(merged_file, index=False)
+                
+                output_merged_file = os.path.join(output_dir, 'all_transactions.csv')
+                combined_df.to_csv(output_merged_file, index=False)
+                
+                transaction_count = len(combined_df)
+                processing_logs[session_id].append(f"Successfully merged {len(csv_files)} CSV files with {transaction_count} transactions")
+            else:
+                processing_logs[session_id].append("No valid transactions found in any of the processed files")
+        else:
+            processing_logs[session_id].append("No CSV files found to merge")
+    except Exception as e:
+        error_message = f"Error merging CSV files: {str(e)}"
+        processing_logs[session_id].append(error_message)
+        logger.error(error_message)
+        logger.error(traceback.format_exc())
+    
+    # Update final status
+    processing_status[session_id]['status'] = 'completed'
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=4446) 

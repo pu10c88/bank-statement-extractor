@@ -1,6 +1,6 @@
-# Bank Statement Extractor v3.1.0
+# Bank Statement Extractor v3.1.1
 
-A professional tool for extracting transaction data from bank statements and generating financial insights with a modern tech-focused UI.
+A professional web application for extracting transaction data from bank statements and generating financial insights with a modern tech-focused UI.
 
 ![SIGMA BI Logo](Logos/icone_1.png)
 
@@ -110,20 +110,6 @@ The application offers comprehensive CSV capabilities:
   - **uploads/**: Temporary storage for uploaded files
   - **webapp.py**: Main Flask application
 - **Logos/**: Application branding assets
-- **build_installer.bat/sh**: Scripts for building standalone installers
-
-## Building Installers
-
-For Windows:
-```
-./build_installer.bat
-```
-
-For macOS/Linux:
-```
-chmod +x build_installer.sh
-./build_installer.sh
-```
 
 ## License
 
